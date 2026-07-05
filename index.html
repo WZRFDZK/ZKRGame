@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>ZKR - Le Boss de la Street </title>
+<title>ZKR - Le BOSS de la Street</title>
 <style>
   html, body {
     margin: 0; padding: 0; height: 100%;
@@ -28,7 +28,7 @@
 <body>
 <div id="wrap">
   <canvas id="game" width="960" height="540"></canvas>
-  <div id="hint">Flèches : se déplacer &nbsp;|&nbsp; Espace : sauter &nbsp;|&nbsp; Bas : s'accroupir / glisser</div>
+  <div id="hint">Flèches : se déplacer &nbsp;|&nbsp; Espace : sauter &nbsp;|&nbsp; Bas : s'accroupir / glisser &nbsp;|&nbsp; Échap : carte des niveaux</div>
 </div>
 
 <script>
@@ -87,9 +87,9 @@ function buildLevel(opts){
   };
 }
 
-function archetypeClassic(worldIndex){
-  const length = 2300 + worldIndex*150;
-  const gapW = 70 + worldIndex*8;
+function archetypeClassic(worldIndex, diff){
+  const length = 2300 + diff*150;
+  const gapW = 70 + diff*8;
   const gaps = [520, 1150, 1750, 2200];
   const segments = [];
   let prev = 0;
@@ -99,22 +99,23 @@ function archetypeClassic(worldIndex){
   let coins = [];
   for(const cx of [240, 780, 1350, 1900]) coins = coins.concat(coinArc(cx, GROUND_Y-50));
   const enemies = [
-    {x:640, y:GROUND_Y-60, left:600, right:940, speed:1.4+worldIndex*0.2},
-    {x:1780, y:GROUND_Y-60, left:1730, right:2060, speed:1.4+worldIndex*0.2},
+    {x:640, y:GROUND_Y-60, left:600, right:940, speed:1.4+diff*0.2},
+    {x:1780, y:GROUND_Y-60, left:1730, right:2060, speed:1.4+diff*0.2},
   ];
+  if(diff >= 2.5) enemies.push({x:1150, y:GROUND_Y-60, left:1050, right:1400, speed:1.4+diff*0.2});
   return buildLevel({segments, coins, enemies, goalX: length + 130, width: length+300});
 }
 
-function archetypeStairs(worldIndex){
+function archetypeStairs(worldIndex, diff){
   const platforms = [], coins = [], enemies = [];
   const stepW = 140, stepH = 20;
-  const nSteps = 5 + (worldIndex >= 2 ? 1 : 0);
+  const nSteps = 5 + Math.floor(diff/2);
 
   let curX = 220, curY = GROUND_Y - 40; 
   for(let i=0;i<nSteps;i++){
     platforms.push([curX, curY, stepW, stepH]);
     coins.push([curX+stepW/2, curY-45]);
-    if(i%2===1) enemies.push({x:curX+20, y:curY-60, left:curX, right:curX+stepW-44, speed:1.2+worldIndex*0.15});
+    if(i%2===1) enemies.push({x:curX+20, y:curY-60, left:curX, right:curX+stepW-44, speed:1.2+diff*0.15});
     curX += stepW+55; curY -= 45;
   }
 
@@ -135,51 +136,52 @@ function archetypeStairs(worldIndex){
   return buildLevel({segments, platforms, coins, enemies, goalX: length - 120, width: length+150});
 }
 
-function archetypeFloating(worldIndex){
-  const length = 2500 + worldIndex*200;
+function archetypeFloating(worldIndex, diff){
+  const length = 2500 + diff*200;
   const spikes = [[0, GROUND_Y, length+200, 40]];
   const platforms = [], enemies = [];
   let curX = 160;
   let coins = [];
   const heights = [GROUND_Y-90, GROUND_Y-165, GROUND_Y-115, GROUND_Y-205, GROUND_Y-135, GROUND_Y-175, GROUND_Y-100];
-  if(worldIndex >= 2) heights.push(GROUND_Y-190);
+  if(diff >= 2) heights.push(GROUND_Y-190);
+  if(diff >= 3.2) heights.push(GROUND_Y-225);
 
   heights.forEach((h, i) => {
     platforms.push([curX, h, 150, 20]);
     coins = coins.concat(coinArc(curX+75, h-42, 2));
-    if(i%2===0) enemies.push({x:curX+35, y:h-60, left:curX, right:curX+106, speed:1.3+worldIndex*0.2});
-    curX += 275 + worldIndex*8;
+    if(i%2===0) enemies.push({x:curX+35, y:h-60, left:curX, right:curX+106, speed:1.3+diff*0.2});
+    curX += 275 + diff*8;
   });
 
   platforms.push([curX, GROUND_Y-95, 220, 20]);
   return buildLevel({platforms, coins, spikes, enemies, goalX: curX+110, width: curX+520, startX: 200, startY: heights[0]-90, goalY: GROUND_Y-95});
 }
 
-function archetypeTraps(worldIndex){
-  const nClusters = 5 + worldIndex, length = 300 + nClusters*350 + 300;
+function archetypeTraps(worldIndex, diff){
+  const nClusters = 5 + Math.round(diff), length = 300 + nClusters*350 + 300;
   const segments = [[0, length]], spikes = [], platforms = [], enemies = [];
   let coins = [];
   let curX = 340;
   for(let i=0;i<nClusters;i++){
-    spikes.push([curX, GROUND_Y-22, 90+worldIndex*6, 22]);
-    platforms.push([curX-25, GROUND_Y-150, 180+worldIndex*6, 20]);
+    spikes.push([curX, GROUND_Y-22, 90+diff*6, 22]);
+    platforms.push([curX-25, GROUND_Y-150, 180+diff*6, 20]);
     coins = coins.concat(coinArc(curX+45, GROUND_Y-190, 2));
-    if(i%2===0) enemies.push({x:curX+260, y:GROUND_Y-60, left:curX+210, right:curX+380, speed:1.5+worldIndex*0.25});
+    if(i%2===0) enemies.push({x:curX+260, y:GROUND_Y-60, left:curX+210, right:curX+380, speed:1.5+diff*0.25});
     curX += 350;
   }
   return buildLevel({segments, platforms, coins, spikes, enemies, goalX: curX + 150, width: length+200});
 }
 
-function archetypeGauntlet(worldIndex){
+function archetypeGauntlet(worldIndex, diff){
   // Gouffre à pièges : petites plateformes de sol séparées par des fosses de pics, avec un chemin aérien alternatif
-  const nGaps = 6 + worldIndex;
+  const nGaps = 6 + Math.round(diff);
   const spikes = [], platforms = [], enemies = [];
   let coins = [];
   const segments = [];
   let prevEnd = 300;
   segments.push([0, prevEnd]);
   for(let i=0;i<nGaps;i++){
-    const gapW = 85 + worldIndex*6;
+    const gapW = 85 + diff*6;
     spikes.push([prevEnd, GROUND_Y-18, gapW, 18]);
     const landStart = prevEnd + gapW, landLen = 150;
     segments.push([landStart, landStart + landLen]);
@@ -189,7 +191,7 @@ function archetypeGauntlet(worldIndex){
     } else {
       coins.push([landStart + landLen/2, GROUND_Y-55]);
     }
-    if(i % 3 === 1) enemies.push({x: landStart+20, y:GROUND_Y-60, left: landStart, right: landStart+landLen-44, speed:1.6+worldIndex*0.25});
+    if(i % 3 === 1) enemies.push({x: landStart+20, y:GROUND_Y-60, left: landStart, right: landStart+landLen-44, speed:1.6+diff*0.25});
     prevEnd = landStart + landLen;
   }
   const length = prevEnd + 260;
@@ -197,19 +199,19 @@ function archetypeGauntlet(worldIndex){
   return buildLevel({segments, platforms, coins, spikes, enemies, goalX: length-140, width: length+150});
 }
 
-function archetypeZigzag(worldIndex){
+function archetypeZigzag(worldIndex, diff){
   // Plateformes en zigzag au-dessus d'une fosse continue : rythme de saut haut/bas
-  const nPlat = 9 + worldIndex;
+  const nPlat = 9 + Math.round(diff);
   const platforms = [], enemies = [];
   let coins = [];
   let curX = 180;
-  const baseY = GROUND_Y - 140, amp = 56;
+  const baseY = GROUND_Y - 140, amp = 56 + diff*4;
   for(let i=0;i<nPlat;i++){
     const y = baseY + (i % 2 === 0 ? -amp : amp) + (i % 4 === 0 ? -18 : 0);
     platforms.push([curX, y, 130, 20]);
     coins = coins.concat(coinArc(curX+65, y-40, 2, 26));
-    if(i % 3 === 2) enemies.push({x:curX+30, y:y-60, left:curX, right:curX+96, speed:1.3+worldIndex*0.2});
-    curX += 210 + worldIndex*6;
+    if(i % 3 === 2) enemies.push({x:curX+30, y:y-60, left:curX, right:curX+96, speed:1.3+diff*0.2});
+    curX += 210 + diff*6;
   }
   platforms.push([curX, GROUND_Y-100, 220, 20]);
   const length = curX + 500;
@@ -217,9 +219,9 @@ function archetypeZigzag(worldIndex){
   return buildLevel({platforms, coins, spikes, enemies, goalX: curX+110, width: length, startX:200, startY: baseY-90, goalY: GROUND_Y-100});
 }
 
-function archetypeCorridor(worldIndex){
+function archetypeCorridor(worldIndex, diff){
   // Couloir au sol avec des plafonds bas : il faut s'accroupir/glisser pour passer dessous
-  const nTunnels = 4 + worldIndex;
+  const nTunnels = 4 + Math.round(diff);
   const platforms = [], enemies = [];
   let coins = [];
   let curX = 500;
@@ -228,28 +230,28 @@ function archetypeCorridor(worldIndex){
     platforms.push([curX, GROUND_Y-70, tunnelLen, 22]); // plafond bas : oblige à s'accroupir pour passer
     coins = coins.concat(coinArc(curX+tunnelLen/2, GROUND_Y-42, 2, 40));
     curX += tunnelLen + 260;
-    if(i % 2 === 0) enemies.push({x:curX-140, y:GROUND_Y-60, left:curX-240, right:curX-40, speed:1.4+worldIndex*0.2});
+    if(i % 2 === 0) enemies.push({x:curX-140, y:GROUND_Y-60, left:curX-240, right:curX-40, speed:1.4+diff*0.2});
   }
   const length = curX + 320;
   const segments = [[0, length]];
   return buildLevel({segments, platforms, coins, enemies, goalX: length-150, width: length+150});
 }
 
-function archetypeIslandRun(worldIndex){
+function archetypeIslandRun(worldIndex, diff){
   // Îlots isolés de tailles et hauteurs irrégulières au-dessus du vide : place à la précision
-  const n = 8 + worldIndex;
+  const n = 8 + Math.round(diff);
   const platforms = [], enemies = [];
   let coins = [];
   let curX = 200;
   for(let i=0;i<n;i++){
-    const w = 70 + ((i*37 + worldIndex*13) % 3) * 30;
+    const w = Math.max(40, 70 - diff*3 + ((i*37 + worldIndex*13) % 3) * 30);
     const yOff = 90 + ((i*53 + worldIndex*7) % 5) * 28;
     const y = GROUND_Y - yOff;
     platforms.push([curX, y, w, 18]);
     if(i % 2 === 0) coins.push([curX+w/2, y-35]);
     else coins = coins.concat(coinArc(curX+w/2, y-35, 2, 22));
-    if(i % 4 === 3) enemies.push({x:curX+10, y:y-58, left:curX, right:curX+Math.max(w-44,20), speed:1.3+worldIndex*0.2});
-    curX += w + 130 + worldIndex*6;
+    if(i % 4 === 3) enemies.push({x:curX+10, y:y-58, left:curX, right:curX+Math.max(w-44,20), speed:1.3+diff*0.2});
+    curX += w + 130 + diff*6;
   }
   platforms.push([curX, GROUND_Y-100, 220, 20]);
   const length = curX + 520;
@@ -257,8 +259,8 @@ function archetypeIslandRun(worldIndex){
   return buildLevel({platforms, coins, spikes, enemies, goalX: curX+110, width: length, startX:200, startY: GROUND_Y-190, goalY: GROUND_Y-100});
 }
 
-function archetypeFinal(worldIndex){
-  const length = 3100 + worldIndex*250, segments = [[0, length+400]], platforms = [], spikes = [], enemies = [];
+function archetypeFinal(worldIndex, diff){
+  const length = 3100 + diff*250, segments = [[0, length+400]], platforms = [], spikes = [], enemies = [];
   let coins = coinArc(230, GROUND_Y-50);
   let fx = 1120;
   [90,150,110,180].forEach((dy, i) => {
@@ -271,7 +273,7 @@ function archetypeFinal(worldIndex){
   const bossX = arenaX + 260;
   enemies.push({
     x: bossX, y: GROUND_Y-100, left: arenaX+60, right: arenaX+460,
-    speed: 1.6 + worldIndex*0.3, w: 80, h: 100, hp: 4 + worldIndex, isBoss: true
+    speed: 1.6 + diff*0.3, w: 80, h: 100, hp: 4 + Math.round(diff*1.5), isBoss: true
   });
   return buildLevel({segments, platforms, coins, spikes, enemies, goalX: length+130, width: length+400});
 }
@@ -280,11 +282,15 @@ function archetypeFinal(worldIndex){
 const NORMAL_ARCHETYPES = [archetypeClassic, archetypeZigzag, archetypeFloating, archetypeCorridor, archetypeStairs, archetypeGauntlet, archetypeIslandRun, archetypeTraps];
 
 function generateLevel(wIdx, lIdx){
-  if(lIdx >= 4) return archetypeFinal(wIdx); // NIVEAU BOSS : toujours un vrai combat de boss
+  // Facteur de progression CONTINU : augmente à chaque monde ET à chaque niveau à l'intérieur d'un même monde
+  // (avant, seul le changement de monde augmentait la difficulté ; les 4 niveaux d'un monde étaient identiques en taille/difficulté).
+  // Ex: monde 0 -> niveaux 0,1,2,3,boss = diff 0, 0.25, 0.5, 0.75, 1 ; monde 1 -> 1, 1.25, 1.5, 1.75, 2 ; etc.
+  const diff = wIdx + Math.min(lIdx, LEVELS_PER_WORLD - 1) / (LEVELS_PER_WORLD - 1);
+  if(lIdx >= 4) return archetypeFinal(wIdx, diff); // NIVEAU BOSS : toujours un vrai combat de boss
   // On fait tourner le bassin de styles avec un décalage différent à chaque monde (pas premier avec la taille du bassin)
   // pour qu'aucun monde ne rejoue la même séquence de styles qu'un autre.
   const slot = (wIdx * 3 + lIdx) % NORMAL_ARCHETYPES.length;
-  return NORMAL_ARCHETYPES[slot](wIdx);
+  return NORMAL_ARCHETYPES[slot](wIdx, diff);
 }
 
 function rectsOverlap(a, b){ return !(a.x+a.w <= b.x || a.x >= b.x+b.w || a.y+a.h <= b.y || a.y >= b.y+b.h); }
@@ -645,9 +651,19 @@ function drawStar(cx, cy, rOuter, rInner, color){
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const STATE_MENU = 0, STATE_PLAYING = 1, STATE_LEVEL_CLEAR = 2, STATE_GAME_OVER = 3, STATE_VICTORY = 4;
+const STATE_MENU = 0, STATE_PLAYING = 1, STATE_LEVEL_CLEAR = 2, STATE_GAME_OVER = 3, STATE_VICTORY = 4, STATE_MAP = 5;
+const LEVELS_PER_WORLD = LEVEL_NAMES.length; // 5 (4 niveaux + 1 boss)
+function FLAT(w, l){ return w * LEVELS_PER_WORLD + l; }
+
 let state = STATE_MENU, worldIndex = 0, levelIndex = 0, lives = 3, score = 0, cameraX = 0, levelTransitionTimer = 0, frameTick = 0;
 let level = null, player = new Player(), enemies = [], keys = {};
+
+// ---- Progression / checkpoints (façon carte du monde Mario) ----
+let unlockedFlat = 0;           // plus grand niveau déjà débloqué (index à plat monde*5+niveau)
+let checkpointWorld = 0;        // monde où l'on respawn après un Game Over (toujours le début de ce monde)
+let checkpointScore = 0;        // score restauré à ce checkpoint
+let mapCursorWorld = 0, mapCursorLevel = 0;
+let mapReturnsToPlay = false;   // true si la carte a été ouverte en pause depuis une partie en cours
 
 function initLevel(){
   level = generateLevel(worldIndex, levelIndex);
@@ -658,13 +674,55 @@ function initLevel(){
   cameraX = 0;
 }
 
-const HANDLED_KEYS = [' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+function startNewGame(){
+  worldIndex = 0; levelIndex = 0; lives = 3; score = 0;
+  unlockedFlat = 0; checkpointWorld = 0; checkpointScore = 0;
+  state = STATE_PLAYING; initLevel();
+}
+
+function respawnAtCheckpoint(){
+  // Un Game Over ne renvoie jamais avant le début du monde en cours (ex: mort dans le désert -> on reste dans le désert)
+  worldIndex = checkpointWorld; levelIndex = 0; lives = 3; score = checkpointScore;
+  state = STATE_PLAYING; initLevel();
+}
+
+function openMap(fromPause){
+  mapCursorWorld = worldIndex; mapCursorLevel = levelIndex;
+  mapReturnsToPlay = !!fromPause;
+  state = STATE_MAP;
+}
+
+function tryLaunchFromMap(){
+  const flat = FLAT(mapCursorWorld, mapCursorLevel);
+  if(flat > unlockedFlat) return; // niveau encore verrouillé
+  worldIndex = mapCursorWorld; levelIndex = mapCursorLevel; lives = 3;
+  checkpointWorld = mapCursorWorld; checkpointScore = score;
+  state = STATE_PLAYING; initLevel();
+}
+
+const HANDLED_KEYS = [' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Escape'];
 window.addEventListener('keydown', e => {
   if(HANDLED_KEYS.includes(e.key)) e.preventDefault(); // évite que la page défile pendant qu'on joue
   keys[e.key] = true;
-  if(e.key === ' ' && (state === STATE_MENU || state === STATE_GAME_OVER || state === STATE_VICTORY)){
-    if(state === STATE_GAME_OVER || state === STATE_VICTORY){ worldIndex = 0; levelIndex = 0; lives = 3; score = 0; }
-    state = STATE_PLAYING; initLevel();
+
+  if(state === STATE_MENU){
+    if(e.key === ' ') startNewGame();
+    else if(e.key === 'm' || e.key === 'M') openMap(false);
+  } else if(state === STATE_GAME_OVER){
+    if(e.key === ' ') respawnAtCheckpoint();
+    else if(e.key === 'm' || e.key === 'M') openMap(false);
+  } else if(state === STATE_VICTORY){
+    if(e.key === ' ') startNewGame();
+    else if(e.key === 'm' || e.key === 'M') openMap(false);
+  } else if(state === STATE_PLAYING){
+    if(e.key === 'Escape') openMap(true);
+  } else if(state === STATE_MAP){
+    if(e.key === 'ArrowLeft') mapCursorLevel = Math.max(0, mapCursorLevel - 1);
+    else if(e.key === 'ArrowRight') mapCursorLevel = Math.min(LEVELS_PER_WORLD - 1, mapCursorLevel + 1);
+    else if(e.key === 'ArrowUp') mapCursorWorld = Math.max(0, mapCursorWorld - 1);
+    else if(e.key === 'ArrowDown') mapCursorWorld = Math.min(WORLD_THEMES.length - 1, mapCursorWorld + 1);
+    else if(e.key === ' ' || e.key === 'Enter') tryLaunchFromMap();
+    else if(e.key === 'Escape') state = mapReturnsToPlay ? STATE_PLAYING : STATE_MENU;
   }
 });
 window.addEventListener('keyup', e => { keys[e.key] = false; });
@@ -681,6 +739,58 @@ function drawCenterText(lines, offset=0){
     ctx.fillStyle = l[1] ? '#fff' : '#bbb';
     ctx.fillText(l[0], WIDTH/2, startY + i*34 + 17);
   });
+}
+
+function drawMapScreen(){
+  let g = ctx.createLinearGradient(0,0,0,HEIGHT); g.addColorStop(0, '#140f28'); g.addColorStop(1, '#3c2e6b');
+  ctx.fillStyle = g; ctx.fillRect(0,0,WIDTH,HEIGHT);
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 26px Arial'; ctx.fillStyle = '#fff';
+  ctx.fillText('CARTE DES NIVEAUX', WIDTH/2, 46);
+
+  const cellW = 148, cellH = 84, gapX = 18, gapY = 20;
+  const gridW = LEVELS_PER_WORLD * cellW + (LEVELS_PER_WORLD - 1) * gapX;
+  const startX = (WIDTH - gridW) / 2;
+  const startY = 96;
+
+  for(let w = 0; w < WORLD_THEMES.length; w++){
+    const theme = WORLD_THEMES[w];
+    const rowY = startY + w * (cellH + gapY);
+
+    ctx.textAlign = 'right'; ctx.font = 'bold 14px Arial'; ctx.fillStyle = rgb(theme.accent);
+    ctx.fillText(theme.name, startX - 16, rowY + cellH/2);
+
+    for(let l = 0; l < LEVELS_PER_WORLD; l++){
+      const cellX = startX + l * (cellW + gapX);
+      const flat = FLAT(w, l);
+      const isLocked = flat > unlockedFlat;
+      const isCursor = (w === mapCursorWorld && l === mapCursorLevel);
+      const isBossCell = l === LEVELS_PER_WORLD - 1;
+
+      ctx.fillStyle = isLocked ? 'rgba(255,255,255,0.06)' : (isBossCell ? 'rgba(200,60,60,0.35)' : rgb(theme.platform));
+      roundRectPath(cellX, rowY, cellW, cellH, 10); ctx.fill();
+
+      ctx.strokeStyle = isCursor ? '#ffd700' : (isLocked ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.4)');
+      ctx.lineWidth = isCursor ? 4 : 2;
+      roundRectPath(cellX, rowY, cellW, cellH, 10); ctx.stroke();
+
+      ctx.font = isBossCell ? '28px Arial' : 'bold 22px Arial';
+      ctx.fillStyle = isLocked ? 'rgba(255,255,255,0.25)' : '#fff';
+      ctx.textAlign = 'center';
+      if(isLocked){
+        ctx.fillText('🔒', cellX + cellW/2, rowY + cellH/2);
+      } else if(isBossCell){
+        ctx.fillText('💀', cellX + cellW/2, rowY + cellH/2 - 6);
+        ctx.font = '11px Arial'; ctx.fillText('BOSS', cellX + cellW/2, rowY + cellH/2 + 20);
+      } else {
+        ctx.fillText(String(l+1), cellX + cellW/2, rowY + cellH/2);
+      }
+    }
+  }
+
+  ctx.textAlign = 'center'; ctx.font = '15px Arial'; ctx.fillStyle = '#ccc';
+  ctx.fillText('Flèches : naviguer   |   ESPACE / ENTRÉE : jouer   |   ÉCHAP : retour', WIDTH/2, HEIGHT - 28);
 }
 
 function drawWorldDeco(worldIdx, camX) {
@@ -872,7 +982,24 @@ function gameLoop(){
     }
     if(state === STATE_PLAYING && player.x + player.w > level.goalX && Math.abs((player.y + player.h) - level.goalY) < 120){ state = STATE_LEVEL_CLEAR; levelTransitionTimer = 60; }
   } else if(state === STATE_LEVEL_CLEAR){
-    levelTransitionTimer--; if(levelTransitionTimer <= 0){ levelIndex++; if(levelIndex>=5){ levelIndex=0; worldIndex++; if(worldIndex>=4){ state=STATE_VICTORY; } else { initLevel(); state=STATE_PLAYING; } } else { initLevel(); state=STATE_PLAYING; } }
+    levelTransitionTimer--;
+    if(levelTransitionTimer <= 0){
+      levelIndex++;
+      if(levelIndex >= LEVELS_PER_WORLD){
+        levelIndex = 0; worldIndex++;
+        if(worldIndex >= WORLD_THEMES.length){
+          unlockedFlat = FLAT(WORLD_THEMES.length - 1, LEVELS_PER_WORLD - 1);
+          state = STATE_VICTORY;
+        } else {
+          checkpointWorld = worldIndex; checkpointScore = score; // nouveau monde = nouveau checkpoint
+          unlockedFlat = Math.max(unlockedFlat, FLAT(worldIndex, levelIndex));
+          initLevel(); state = STATE_PLAYING;
+        }
+      } else {
+        unlockedFlat = Math.max(unlockedFlat, FLAT(worldIndex, levelIndex));
+        initLevel(); state = STATE_PLAYING;
+      }
+    }
   }
 
   ctx.clearRect(0,0,WIDTH,HEIGHT);
@@ -884,8 +1011,10 @@ function gameLoop(){
     drawCenterText([
       ['ZKR - LE RAPPEUR DU BITUME', true],
       ['Appuie sur ESPACE pour lancer le jeu', false],
-      ['Clique n\'importe où sur l\'écran si rien ne se passe', false]
+      ['Appuie sur M pour choisir un niveau (carte du monde)', false]
     ], 40);
+  } else if(state === STATE_MAP){
+    drawMapScreen();
   } else if(state === STATE_VICTORY){
     // Écran de victoire dédié : on a fini le monde 4, worldIndex peut être hors des bornes de WORLD_THEMES,
     // donc on ne tente plus de dessiner un niveau de jeu ici (ça faisait planter le jeu).
@@ -920,7 +1049,7 @@ function gameLoop(){
     
     ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,WIDTH,50); ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial';
     ctx.fillText(`VIES : ${"❤️".repeat(Math.max(0, lives))}   |   SCORE : ${score}`, 20, 30);
-    ctx.textAlign = 'right'; ctx.fillText(`${theme.name} - ${LEVEL_NAMES[levelIndex]}`, WIDTH - 20, 30); ctx.textAlign = 'left';
+    ctx.textAlign = 'right'; ctx.fillText(`${theme.name} - ${LEVEL_NAMES[levelIndex]}   |   ÉCHAP : carte`, WIDTH - 20, 30); ctx.textAlign = 'left';
 
     const boss = enemies.find(e => e.isBoss && e.alive);
     if(boss){
@@ -935,8 +1064,16 @@ function gameLoop(){
     if(state === STATE_LEVEL_CLEAR) drawCenterText([['NIVEAU REUSSI !', true]]);
   }
   
-  if(state === STATE_GAME_OVER) drawCenterText([['GAME OVER', true], ['Appuie sur ESPACE pour rejouer', false]]);
-  if(state === STATE_VICTORY) drawCenterText([['VICTOIRE TOTALE !', true], ['Tu as fini le jeu !', false]]);
+  if(state === STATE_GAME_OVER) drawCenterText([
+    ['GAME OVER', true],
+    [`ESPACE : rejouer depuis ${WORLD_THEMES[checkpointWorld].name}`, false],
+    ['M : carte des niveaux', false]
+  ]);
+  if(state === STATE_VICTORY) drawCenterText([
+    ['VICTOIRE TOTALE !', true],
+    ['Tu as fini le jeu !', false],
+    ['ESPACE : nouvelle partie   |   M : carte des niveaux', false]
+  ]);
 
   requestAnimationFrame(gameLoop);
 }
