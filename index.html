@@ -2,7 +2,8 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>ZKR - Le BOSS de la Street</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>ZKR - Le Boss de la Street</title>
 <style>
   html, body {
     margin: 0; padding: 0; height: 100%;
@@ -11,7 +12,7 @@
     font-family: Arial, Helvetica, sans-serif;
     overflow: hidden;
   }
-  #wrap { text-align: center; }
+  #wrap { text-align: center; position: relative; }
   canvas {
     background: #000;
     display: block;
@@ -19,16 +20,90 @@
     border: 3px solid #333;
     box-shadow: 0 0 40px rgba(0,0,0,0.6);
     image-rendering: pixelated;
+    max-width: 96vw;
+    max-height: 80vh;
+    width: auto; height: auto;
+    touch-action: none;
   }
   #hint {
     color: #999; font-size: 13px; margin-top: 10px;
   }
+  #deviceOverlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(8,6,16,0.94);
+    z-index: 30;
+  }
+  #deviceOverlay.hidden { display: none; }
+  #deviceBox { color: #fff; text-align: center; padding: 20px; }
+  #deviceTitle { font-size: 20px; font-weight: bold; margin-bottom: 22px; letter-spacing: 0.5px; }
+  #deviceButtons { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }
+  .deviceBtn {
+    background: linear-gradient(#2f6fe0, #1c4aa8);
+    color: #fff; border: 2px solid #5b93f0; border-radius: 14px;
+    padding: 22px 26px; font-size: 15px; font-weight: bold;
+    font-family: Arial, Helvetica, sans-serif; cursor: pointer;
+    line-height: 1.7; min-width: 150px;
+  }
+  .deviceBtn:active { transform: scale(0.96); }
+  #touchControls {
+    display: none;
+    position: absolute; left: 0; right: 0; bottom: 4%;
+    justify-content: space-between; align-items: flex-end;
+    padding: 0 3%; pointer-events: none; z-index: 15;
+  }
+  #touchControls.active { display: flex; }
+  #tcLeftPad { display: flex; gap: 10px; pointer-events: auto; }
+  #tcRightPad { display: flex; align-items: flex-end; gap: 12px; pointer-events: auto; }
+  #tcShoot { background: rgba(255,140,40,0.35); border-color: rgba(255,180,90,0.6); font-size: 13px; }
+  .tcBtn {
+    background: rgba(255,255,255,0.16);
+    border: 2px solid rgba(255,255,255,0.45);
+    color: #fff; font-weight: bold; font-family: Arial, Helvetica, sans-serif;
+    -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  .tcRound { width: 56px; height: 56px; border-radius: 50%; font-size: 20px; }
+  .tcBig { width: 92px; height: 92px; border-radius: 50%; font-size: 14px; background: rgba(60,140,255,0.35); }
+  .tcSmall {
+    position: absolute; top: -64px; right: 3%; width: 46px; height: 46px; border-radius: 10px; font-size: 18px;
+    pointer-events: auto;
+  }
+  .tcSmall2 {
+    position: absolute; top: -64px; left: 3%; width: 46px; height: 46px; border-radius: 10px; font-size: 18px;
+    pointer-events: auto; display: none;
+  }
+  .tcSmall2.show { display: block; }
+  .tcBtn:active { background: rgba(255,255,255,0.38); }
 </style>
 </head>
 <body>
 <div id="wrap">
   <canvas id="game" width="960" height="540"></canvas>
-  <div id="hint">Flèches : se déplacer &nbsp;|&nbsp; Espace : sauter &nbsp;|&nbsp; Bas : s'accroupir / glisser &nbsp;|&nbsp; Échap : carte des niveaux</div>
+  <div id="hint">Flèches : se déplacer &nbsp;|&nbsp; Espace : sauter &nbsp;|&nbsp; Bas : s'accroupir / glisser &nbsp;|&nbsp; E : tir à distance &nbsp;|&nbsp; Échap : carte &nbsp;|&nbsp; C : personnages</div>
+
+  <div id="deviceOverlay">
+    <div id="deviceBox">
+      <div id="deviceTitle">SUR QUEL APPAREIL JOUES-TU ?</div>
+      <div id="deviceButtons">
+        <button class="deviceBtn" id="btnMobile">📱<br>MOBILE / TABLETTE<br>(tactile)</button>
+        <button class="deviceBtn" id="btnPC">💻<br>ORDINATEUR<br>(clavier)</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="touchControls">
+    <div id="tcLeftPad">
+      <button class="tcBtn tcRound" id="tcLeft">◀</button>
+      <button class="tcBtn tcRound" id="tcRight">▶</button>
+      <button class="tcBtn tcRound" id="tcDown">▼</button>
+    </div>
+    <div id="tcRightPad">
+      <button class="tcBtn tcRound" id="tcShoot">TIR</button>
+      <button class="tcBtn tcBig" id="tcJump">SAUT</button>
+    </div>
+    <button class="tcBtn tcSmall" id="tcMenu">☰</button>
+    <button class="tcBtn tcSmall2" id="tcPerso">🧑</button>
+  </div>
 </div>
 
 <script>
@@ -36,6 +111,7 @@ const WIDTH = 960, HEIGHT = 540;
 const GRAVITY = 0.85, MAX_FALL = 18, JUMP_VELOCITY = -16.5, MOVE_SPEED = 5.2;
 const GROUND_Y = 460, DEATH_Y = 680;
 const PLAYER_WIDTH = 42, PLAYER_HEIGHT = 76, PLAYER_CROUCH_HEIGHT = 46;
+const SHOOT_COOLDOWN = 20, PROJECTILE_SPEED = 11.5, PROJECTILE_LIFE = 70;
 
 const WORLD_THEMES = [
   { name: "LA VILLE", bgTop: [18,14,38], bgBottom: [55,46,88], ground: [35,33,48], groundTop: [70,68,92], platform: [80,78,100], platformTop: [110,108,135], spike: [180,180,190], enemy: [25,25,25], accent: [60,140,255], deco: [32,26,53], clouds: [75,65,105] },
@@ -44,11 +120,93 @@ const WORLD_THEMES = [
   { name: "LA BANQUISE", bgTop: [120,175,210], bgBottom: [200,225,240], ground: [180,210,225], groundTop: [235,245,255], platform: [150,185,210], platformTop: [215,230,245], spike: [130,180,210], enemy: [110,145,180], accent: [90,160,220], deco: [155,195,220], clouds: [235,245,250] },
 ];
 
+// ===================== MUSIQUES =====================
+// Une piste par monde (ambiance qui colle à la DA de chaque monde), + une pour le Game Over et une pour la Victoire.
+// LA VILLE      -> chiptune énergique "plateforme urbaine"
+// LE DÉSERT     -> thème d'exploration/aventure (grandes étendues à parcourir)
+// LA FORÊT      -> instrumental 8-bit plus posé, adapté au platforming en forêt
+// LA BANQUISE   -> thème de combat de boss, pour l'intensité du dernier monde / roi des glaces
+const MUSIC = {
+  ville:    new Audio('nickpanekaiassets-high-energy-chiptune-for-platform-games-225292.mp3'),
+  desert:   new Audio('nickpanekaiassets-exploration-chiptune-rpg-adventure-theme-336428.mp3'),
+  foret:    new Audio('nickpanekaiassets-platform-shoes-8-bit-chiptune-instrumental-336417.mp3'),
+  banquise: new Audio('retro-bgm-chan-boss-battle-part2-534626.mp3'),
+  gameover: new Audio('lightyeartraxx-kl-peach-game-over-ii-135684.mp3'),
+  victory:  new Audio('maksymmalko-fanfare-award-awards-music-557068.mp3'),
+};
+Object.values(MUSIC).forEach(a => { a.loop = true; a.volume = 0.45; a.preload = 'auto'; });
+
+const WORLD_MUSIC_KEYS = ['ville', 'desert', 'foret', 'banquise']; // même ordre que WORLD_THEMES
+
+let currentMusicKey = null;
+function playMusic(key){
+  if(currentMusicKey === key) return;
+  if(currentMusicKey && MUSIC[currentMusicKey]){ MUSIC[currentMusicKey].pause(); MUSIC[currentMusicKey].currentTime = 0; }
+  currentMusicKey = key;
+  if(key && MUSIC[key]){
+    MUSIC[key].currentTime = 0;
+    MUSIC[key].play().catch(() => {}); // autoplay bloqué tant qu'il n'y a pas eu d'interaction : sans risque, on retentera à chaque frame
+  }
+}
+// Choisit la bonne musique selon l'état du jeu / le monde courant. Appelé en boucle (sans coût si rien ne change).
+function updateMusic(){
+  let key = null;
+  if(state === STATE_PLAYING || state === STATE_LEVEL_CLEAR){
+    key = WORLD_MUSIC_KEYS[Math.min(worldIndex, WORLD_MUSIC_KEYS.length - 1)];
+  } else if(state === STATE_GAME_OVER){
+    key = 'gameover';
+  } else if(state === STATE_VICTORY){
+    key = 'victory';
+  }
+  playMusic(key);
+}
+
 // Ennemis "de base" et boss par monde, calqués sur la DA (voyou cagoulé, scorpion, créature de forêt, bonhomme de neige / gros bras, pharaon, monstre-arbre, roi des glaces)
 const ENEMY_KINDS = ['thug', 'scorpion', 'critter', 'snow'];
 const BOSS_KINDS  = ['thug_boss', 'pharaoh_boss', 'tree_boss', 'ice_boss'];
 
 const LEVEL_NAMES = ["NIVEAU 1", "NIVEAU 2", "NIVEAU 3", "NIVEAU 4", "NIVEAU BOSS"];
+const BOSS_NAMES = ["LE CAÏD DE LA RUE", "LE PHARAON MAUDIT", "L'ESPRIT DE LA FORÊT", "LE ROI DES GLACES"];
+
+// ===================== PERSONNAGES DÉBLOCABLES =====================
+// Chaque personnage réutilise le même squelette de sprite (drawPlayerSprite) mais avec
+// sa propre palette de couleurs + un petit accessoire thématique. Ils se débloquent
+// via des quêtes simples basées sur la progression du joueur (stats ci-dessous).
+const DEFAULT_PALETTE = { skin:'#c9884f', skinShade:'#a8703f', hoodie:'#14141a', hoodieLight:'#20202a', accent:'#2f6fe0', accentLight:'#5b93f0', hair:'#151018', hairHi:'#241a26', shoeWhite:'#f1f5fa', shoeBlack:'#15151a', silver:'#e9e9ee' };
+
+const CHARACTERS = [
+  {
+    id: 'zkr', name: 'ZKR', theme: 'Street (original)', accessory: null,
+    palette: DEFAULT_PALETTE,
+    quest: 'Débloqué dès le départ.',
+    isUnlocked: () => true
+  },
+  {
+    id: 'kenji', name: 'KENJI', theme: 'Manga Shonen', accessory: 'headband',
+    palette: { skin:'#e8b98a', skinShade:'#c99968', hoodie:'#e6621f', hoodieLight:'#ff8a42', accent:'#1c1c1c', accentLight:'#3a3a3a', hair:'#1c1c1c', hairHi:'#333', shoeWhite:'#f1f5fa', shoeBlack:'#15151a', silver:'#e9e9ee' },
+    quest: 'Termine le monde LA VILLE (bats son boss).',
+    isUnlocked: () => worldsCompletedCount >= 1
+  },
+  {
+    id: 'sakura', name: 'SAKURA', theme: 'Animé Ninja', accessory: 'mask',
+    palette: { skin:'#e3b48f', skinShade:'#c4926c', hoodie:'#2a1f3d', hoodieLight:'#402f5c', accent:'#c23bd8', accentLight:'#e07cf0', hair:'#3a1030', hairHi:'#5a1a4a', shoeWhite:'#e9e9ee', shoeBlack:'#15151a', silver:'#e9e9ee' },
+    quest: 'Bats 2 boss au total.',
+    isUnlocked: () => bossesDefeated >= 2
+  },
+  {
+    id: 'leo', name: 'LÉO', theme: 'Footballeur', accessory: 'jersey', number: '9',
+    palette: { skin:'#c9884f', skinShade:'#a8703f', hoodie:'#1560c4', hoodieLight:'#2f7fe0', accent:'#ffffff', accentLight:'#dfe9ff', hair:'#221510', hairHi:'#3a281f', shoeWhite:'#f1f5fa', shoeBlack:'#15151a', silver:'#e9e9ee' },
+    quest: 'Collecte 60 pièces au total.',
+    isUnlocked: () => totalCoinsAllTime >= 60
+  },
+  {
+    id: 'legend', name: 'ZKR LÉGENDE', theme: 'Doré / Boss final', accessory: 'crown',
+    palette: { skin:'#c9884f', skinShade:'#a8703f', hoodie:'#151018', hoodieLight:'#2a2432', accent:'#ffd23c', accentLight:'#fff0a0', hair:'#151018', hairHi:'#3a3020', shoeWhite:'#fff6d8', shoeBlack:'#3a2f10', silver:'#ffe98a' },
+    quest: 'Termine le jeu en entier (bats les 4 mondes).',
+    isUnlocked: () => victoriesCount >= 1
+  }
+];
+function getCharacter(id){ return CHARACTERS.find(c => c.id === id) || CHARACTERS[0]; }
 
 function rgb(c){ return `rgb(${c[0]},${c[1]},${c[2]})`; }
 function mod(n, m){ return ((n % m) + m) % m; }
@@ -66,6 +224,8 @@ function buildLevel(opts){
   const coins = opts.coins || [];
   const spikes = opts.spikes || [];
   const enemies = opts.enemies || [];
+  // movingPlatforms : tableau de [x, y, w, h, axis('x'|'y'), range, speed, phase]
+  const movingPlatforms = (opts.movingPlatforms || []).map(m => new MovingPlatform(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7] || 0));
   const groundRects = segments.map(s => ({x:s[0], y:GROUND_Y, w:s[1]-s[0], h:HEIGHT-GROUND_Y+80}));
   let platformRects = platforms.map(p => ({x:p[0], y:p[1], w:p[2], h:p[3]}));
   const spikeRects = spikes.map(s => ({x:s[0], y:s[1], w:s[2], h:s[3]}));
@@ -74,11 +234,18 @@ function buildLevel(opts){
   const goalY = (opts.goalY !== undefined) ? opts.goalY : GROUND_Y;
 
   const spawnPlatform = {x: startX - 70, y: startY + PLAYER_HEIGHT, w: 280, h: 24};
-  platformRects = platformRects.concat([spawnPlatform]);
+  platformRects = platformRects.concat([spawnPlatform]).concat(movingPlatforms);
+
+  // Si le niveau contient un boss, on place une barrière énergétique juste avant le drapeau :
+  // impossible de terminer le niveau tant que ce boss n'est pas vaincu.
+  const hasBoss = enemies.some(e => e.isBoss);
+  const bossBarrierX = (hasBoss && opts.goalX !== undefined) ? opts.goalX - 90 : null;
 
   return {
     groundRects, platformRects,
     solids: groundRects.concat(platformRects),
+    movingPlatforms,
+    bossBarrierX,
     coins: coins.map(c => ({x:c[0], y:c[1], taken:false})),
     spikes: spikeRects,
     enemyData: enemies,
@@ -107,7 +274,7 @@ function archetypeClassic(worldIndex, diff){
 }
 
 function archetypeStairs(worldIndex, diff){
-  const platforms = [], coins = [], enemies = [];
+  const platforms = [], coins = [], enemies = [], movingPlatforms = [];
   const stepW = 140, stepH = 20;
   const nSteps = 5 + Math.floor(diff/2);
 
@@ -120,7 +287,12 @@ function archetypeStairs(worldIndex, diff){
   }
 
   const plateauX = curX, plateauY = curY;
-  platforms.push([plateauX, plateauY, 230, stepH]);
+  // Le plateau sommital ondule verticalement à partir d'une certaine difficulté : il faut sauter au bon moment
+  if(diff >= 1.5){
+    movingPlatforms.push([plateauX, plateauY, 230, stepH, 'y', 40, 0.025 + diff*0.002, 0]);
+  } else {
+    platforms.push([plateauX, plateauY, 230, stepH]);
+  }
   for(const c of coinArc(plateauX+115, plateauY-45, 3)) coins.push(c);
 
   curX = plateauX+230+55; curY = plateauY + 45;
@@ -133,13 +305,13 @@ function archetypeStairs(worldIndex, diff){
   const groundStart = curX - 40;
   const length = curX + 420;
   const segments = [[0, 300], [groundStart, length]];
-  return buildLevel({segments, platforms, coins, enemies, goalX: length - 120, width: length+150});
+  return buildLevel({segments, platforms, movingPlatforms, coins, enemies, goalX: length - 120, width: length+150});
 }
 
 function archetypeFloating(worldIndex, diff){
   const length = 2500 + diff*200;
   const spikes = [[0, GROUND_Y, length+200, 40]];
-  const platforms = [], enemies = [];
+  const platforms = [], enemies = [], movingPlatforms = [];
   let curX = 160;
   let coins = [];
   const heights = [GROUND_Y-90, GROUND_Y-165, GROUND_Y-115, GROUND_Y-205, GROUND_Y-135, GROUND_Y-175, GROUND_Y-100];
@@ -147,14 +319,21 @@ function archetypeFloating(worldIndex, diff){
   if(diff >= 3.2) heights.push(GROUND_Y-225);
 
   heights.forEach((h, i) => {
-    platforms.push([curX, h, 150, 20]);
+    // À partir d'une certaine difficulté, une plateforme sur trois devient mobile (alternance horizontale/verticale)
+    if(diff >= 1 && i % 3 === 2){
+      const axis = i % 6 === 2 ? 'y' : 'x';
+      const range = axis === 'y' ? 50 : 70;
+      movingPlatforms.push([curX, h, 150, 20, axis, range, 0.028 + diff*0.003, i]);
+    } else {
+      platforms.push([curX, h, 150, 20]);
+    }
     coins = coins.concat(coinArc(curX+75, h-42, 2));
     if(i%2===0) enemies.push({x:curX+35, y:h-60, left:curX, right:curX+106, speed:1.3+diff*0.2});
     curX += 275 + diff*8;
   });
 
   platforms.push([curX, GROUND_Y-95, 220, 20]);
-  return buildLevel({platforms, coins, spikes, enemies, goalX: curX+110, width: curX+520, startX: 200, startY: heights[0]-90, goalY: GROUND_Y-95});
+  return buildLevel({platforms, movingPlatforms, coins, spikes, enemies, goalX: curX+110, width: curX+520, startX: 200, startY: heights[0]-90, goalY: GROUND_Y-95});
 }
 
 function archetypeTraps(worldIndex, diff){
@@ -175,7 +354,7 @@ function archetypeTraps(worldIndex, diff){
 function archetypeGauntlet(worldIndex, diff){
   // Gouffre à pièges : petites plateformes de sol séparées par des fosses de pics, avec un chemin aérien alternatif
   const nGaps = 6 + Math.round(diff);
-  const spikes = [], platforms = [], enemies = [];
+  const spikes = [], platforms = [], enemies = [], movingPlatforms = [];
   let coins = [];
   const segments = [];
   let prevEnd = 300;
@@ -186,7 +365,12 @@ function archetypeGauntlet(worldIndex, diff){
     const landStart = prevEnd + gapW, landLen = 150;
     segments.push([landStart, landStart + landLen]);
     if(i % 2 === 0){
-      platforms.push([prevEnd + gapW/2 - 45, GROUND_Y-115, 90, 18]);
+      // Passé un certain seuil de difficulté, la plateforme au-dessus des pics glisse : il faut viser le bon moment
+      if(diff >= 2.5){
+        movingPlatforms.push([prevEnd + gapW/2 - 45, GROUND_Y-115, 90, 18, 'x', 35, 0.03 + diff*0.002, i]);
+      } else {
+        platforms.push([prevEnd + gapW/2 - 45, GROUND_Y-115, 90, 18]);
+      }
       coins.push([prevEnd + gapW/2, GROUND_Y-145]);
     } else {
       coins.push([landStart + landLen/2, GROUND_Y-55]);
@@ -196,27 +380,34 @@ function archetypeGauntlet(worldIndex, diff){
   }
   const length = prevEnd + 260;
   segments.push([prevEnd, length]);
-  return buildLevel({segments, platforms, coins, spikes, enemies, goalX: length-140, width: length+150});
+  return buildLevel({segments, platforms, movingPlatforms, coins, spikes, enemies, goalX: length-140, width: length+150});
 }
 
 function archetypeZigzag(worldIndex, diff){
   // Plateformes en zigzag au-dessus d'une fosse continue : rythme de saut haut/bas
   const nPlat = 9 + Math.round(diff);
-  const platforms = [], enemies = [];
+  const platforms = [], enemies = [], movingPlatforms = [];
   let coins = [];
   let curX = 180;
-  const baseY = GROUND_Y - 140, amp = 56 + diff*4;
+  // amplitude et espacement FIXES : ils correspondent à la portée de saut du joueur.
+  // Les faire grandir avec la difficulté rendait certaines plateformes injouables (marge de saut ~nulle) en fin de partie.
+  const baseY = GROUND_Y - 140, amp = 56;
   for(let i=0;i<nPlat;i++){
     const y = baseY + (i % 2 === 0 ? -amp : amp) + (i % 4 === 0 ? -18 : 0);
-    platforms.push([curX, y, 130, 20]);
+    // Une plateforme sur quatre glisse latéralement à partir d'une certaine difficulté : oblige à ajuster le timing du saut
+    if(diff >= 1.5 && i % 4 === 3){
+      movingPlatforms.push([curX, y, 130, 20, 'x', 60, 0.03 + diff*0.003, i]);
+    } else {
+      platforms.push([curX, y, 130, 20]);
+    }
     coins = coins.concat(coinArc(curX+65, y-40, 2, 26));
     if(i % 3 === 2) enemies.push({x:curX+30, y:y-60, left:curX, right:curX+96, speed:1.3+diff*0.2});
-    curX += 210 + diff*6;
+    curX += 210;
   }
   platforms.push([curX, GROUND_Y-100, 220, 20]);
   const length = curX + 500;
   const spikes = [[0, GROUND_Y, length, 40]];
-  return buildLevel({platforms, coins, spikes, enemies, goalX: curX+110, width: length, startX:200, startY: baseY-90, goalY: GROUND_Y-100});
+  return buildLevel({platforms, movingPlatforms, coins, spikes, enemies, goalX: curX+110, width: length, startX:200, startY: baseY-90, goalY: GROUND_Y-100});
 }
 
 function archetypeCorridor(worldIndex, diff){
@@ -240,14 +431,20 @@ function archetypeCorridor(worldIndex, diff){
 function archetypeIslandRun(worldIndex, diff){
   // Îlots isolés de tailles et hauteurs irrégulières au-dessus du vide : place à la précision
   const n = 8 + Math.round(diff);
-  const platforms = [], enemies = [];
+  const platforms = [], enemies = [], movingPlatforms = [];
   let coins = [];
   let curX = 200;
   for(let i=0;i<n;i++){
     const w = Math.max(40, 70 - diff*3 + ((i*37 + worldIndex*13) % 3) * 30);
     const yOff = 90 + ((i*53 + worldIndex*7) % 5) * 28;
     const y = GROUND_Y - yOff;
-    platforms.push([curX, y, w, 18]);
+    // Un îlot sur trois dérive (horizontalement ou verticalement) à partir d'une certaine difficulté
+    if(diff >= 1.2 && i % 3 === 1){
+      const axis = i % 6 === 1 ? 'y' : 'x';
+      movingPlatforms.push([curX, y, w, 18, axis, axis==='y'?45:65, 0.026 + diff*0.0025, i]);
+    } else {
+      platforms.push([curX, y, w, 18]);
+    }
     if(i % 2 === 0) coins.push([curX+w/2, y-35]);
     else coins = coins.concat(coinArc(curX+w/2, y-35, 2, 22));
     if(i % 4 === 3) enemies.push({x:curX+10, y:y-58, left:curX, right:curX+Math.max(w-44,20), speed:1.3+diff*0.2});
@@ -256,7 +453,7 @@ function archetypeIslandRun(worldIndex, diff){
   platforms.push([curX, GROUND_Y-100, 220, 20]);
   const length = curX + 520;
   const spikes = [[0, GROUND_Y, length, 40]];
-  return buildLevel({platforms, coins, spikes, enemies, goalX: curX+110, width: length, startX:200, startY: GROUND_Y-190, goalY: GROUND_Y-100});
+  return buildLevel({platforms, movingPlatforms, coins, spikes, enemies, goalX: curX+110, width: length, startX:200, startY: GROUND_Y-190, goalY: GROUND_Y-100});
 }
 
 function archetypeFinal(worldIndex, diff){
@@ -295,6 +492,24 @@ function generateLevel(wIdx, lIdx){
 
 function rectsOverlap(a, b){ return !(a.x+a.w <= b.x || a.x >= b.x+b.w || a.y+a.h <= b.y || a.y >= b.y+b.h); }
 
+// Projectile de l'attaque à distance : tiré par le joueur, se déplace en ligne droite,
+// disparaît en touchant un ennemi, un mur, ou au bout de sa durée de vie.
+class Projectile {
+  constructor(x, y, dir, color){
+    this.x = x; this.y = y; this.w = 16; this.h = 8;
+    this.dir = dir; this.vx = PROJECTILE_SPEED * dir;
+    this.life = PROJECTILE_LIFE; this.dead = false;
+    this.color = color || '#5b93f0';
+  }
+  get rect(){ return {x:this.x, y:this.y, w:this.w, h:this.h}; }
+  update(solids){
+    this.x += this.vx;
+    this.life--;
+    if(this.life <= 0) this.dead = true;
+    for(const s of solids){ if(rectsOverlap(this.rect, s)){ this.dead = true; break; } }
+  }
+}
+
 class Enemy {
   constructor(x, y, left, right, speed, opts={}){
     this.x=x; this.y=y; this.left=left; this.right=right; this.speed=speed; this.dir=1; this.alive=true;
@@ -317,10 +532,29 @@ class Enemy {
   }
 }
 
+// Plateforme mobile : oscille en va-et-vient sur l'axe X (gauche/droite) ou Y (haut/bas)
+// autour de sa position de base, selon une sinusoïde. Le joueur qui se tient dessus
+// est "transporté" horizontalement (voir Player.update / ridingPlatform).
+class MovingPlatform {
+  constructor(x, y, w, h, axis, range, speed, phase=0){
+    this.baseX = x; this.baseY = y; this.w = w; this.h = h;
+    this.axis = axis; // 'x' = va-et-vient horizontal, 'y' = va-et-vient vertical
+    this.range = range; this.speed = speed; this.phase = phase;
+    this.x = x; this.y = y; this.dx = 0; this.dy = 0;
+  }
+  update(tick){
+    const prevX = this.x, prevY = this.y;
+    const offset = Math.sin(tick*this.speed + this.phase) * this.range;
+    if(this.axis === 'x') this.x = this.baseX + offset;
+    else this.y = this.baseY + offset;
+    this.dx = this.x - prevX; this.dy = this.y - prevY;
+  }
+}
+
 class Player {
-  constructor(){ this.x=0; this.y=0; this.vx=0; this.vy=0; this.w=PLAYER_WIDTH; this.h=PLAYER_HEIGHT; this.onGround=false; this.invincibleTimer=0; this.facing=1; this.slideTimer=0; }
+  constructor(){ this.x=0; this.y=0; this.vx=0; this.vy=0; this.w=PLAYER_WIDTH; this.h=PLAYER_HEIGHT; this.onGround=false; this.invincibleTimer=0; this.facing=1; this.slideTimer=0; this.ridingPlatform=null; this.shootCooldown=0; }
   get rect(){ return {x:this.x, y:this.y, w:this.w, h:this.h}; }
-  reset(x, y){ this.x=x; this.y=y; this.vx=0; this.vy=0; this.h=PLAYER_HEIGHT; this.onGround=false; this.invincibleTimer=60; this.slideTimer=0; }
+  reset(x, y){ this.x=x; this.y=y; this.vx=0; this.vy=0; this.h=PLAYER_HEIGHT; this.onGround=false; this.invincibleTimer=60; this.slideTimer=0; this.shootCooldown=0; }
   update(keys, solids){
     const left = !!keys['ArrowLeft'] || !!keys['q'] || !!keys['Q'];
     const right = !!keys['ArrowRight'] || !!keys['d'] || !!keys['D'];
@@ -352,13 +586,28 @@ class Player {
     }
 
     if(jump && this.onGround && !isCrouching){ this.vy = JUMP_VELOCITY; this.onGround = false; }
+
+    // Si on était posé sur une plateforme mobile la frame précédente, on est transporté avec elle,
+    // sur X ET sur Y (avant seul l'axe X était géré : un joueur posé sur une plateforme qui monte/descend
+    // se faisait distancer par elle, ce qui donnait l'impression de "traverser" ou de tomber à travers).
+    if(this.ridingPlatform){
+      this.x += this.ridingPlatform.dx;
+      this.y += this.ridingPlatform.dy;
+    }
+
     this.x += this.vx;
     if(this.x < 0) this.x = 0;
     for(const s of solids){ if(rectsOverlap(this.rect, s)){ if(this.vx > 0) this.x = s.x - this.w; else if(this.vx < 0) this.x = s.x + s.w; } }
     this.vy += GRAVITY; if(this.vy > MAX_FALL) this.vy = MAX_FALL;
     this.y += this.vy; this.onGround = false;
-    for(const s of solids){ if(rectsOverlap(this.rect, s)){ if(this.vy > 0){ this.y = s.y - this.h; this.vy = 0; this.onGround = true; } else if(this.vy < 0){ this.y = s.y + s.h; this.vy = 0; } } }
+    let landedOn = null;
+    // On teste d'abord la plateforme qu'on chevauchait déjà (si elle existe toujours) pour éviter
+    // qu'un mouvement rapide de plateforme + gravité ne fasse "sauter" la détection d'une frame à l'autre.
+    const orderedSolids = this.ridingPlatform ? [this.ridingPlatform, ...solids.filter(s => s !== this.ridingPlatform)] : solids;
+    for(const s of orderedSolids){ if(rectsOverlap(this.rect, s)){ if(this.vy > 0){ this.y = s.y - this.h; this.vy = 0; this.onGround = true; landedOn = s; } else if(this.vy < 0){ this.y = s.y + s.h; this.vy = 0; } } }
+    this.ridingPlatform = (landedOn instanceof MovingPlatform) ? landedOn : null;
     if(this.invincibleTimer > 0) this.invincibleTimer--;
+    if(this.shootCooldown > 0) this.shootCooldown--;
   }
 }
 
@@ -376,23 +625,24 @@ function roundRectPath(x, y, w, h, r){
   ctx.closePath();
 }
 
-function drawPlayerSprite(x, y, w, h, dir, vx, onGround, crouching, tick){
+function drawPlayerSprite(x, y, w, h, dir, vx, onGround, crouching, tick, charDef){
   ctx.save();
   ctx.translate(x, y);
   if(dir < 0){ ctx.translate(w, 0); ctx.scale(-1, 1); }
 
-  // Palette calquée sur la charte ZKR (peau ambrée, hoodie noir/bleu, casque rouge/bleu, afro, sneakers bicolores)
-  const skin = '#c9884f';
-  const skinShade = '#a8703f';
-  const hoodie = '#14141a';
-  const hoodieLight = '#20202a';
-  const accent = '#2f6fe0';
-  const accentLight = '#5b93f0';
-  const hair = '#151018';
-  const hairHi = '#241a26';
-  const shoeWhite = '#f1f5fa';
-  const shoeBlack = '#15151a';
-  const silver = '#e9e9ee';
+  // Palette du personnage sélectionné (ZKR par défaut si aucun n'est précisé)
+  const pal = (charDef && charDef.palette) ? charDef.palette : DEFAULT_PALETTE;
+  const skin = pal.skin;
+  const skinShade = pal.skinShade;
+  const hoodie = pal.hoodie;
+  const hoodieLight = pal.hoodieLight;
+  const accent = pal.accent;
+  const accentLight = pal.accentLight;
+  const hair = pal.hair;
+  const hairHi = pal.hairHi;
+  const shoeWhite = pal.shoeWhite;
+  const shoeBlack = pal.shoeBlack;
+  const silver = pal.silver;
 
   const headR = w*0.36;
   const headCX = w*0.5, headCY = headR + 2;
@@ -517,6 +767,40 @@ function drawPlayerSprite(x, y, w, h, dir, vx, onGround, crouching, tick){
     for(let i=0;i<3;i++){ ctx.beginPath(); ctx.moveTo(-4-i*6, legBot-6); ctx.lineTo(-14-i*6, legBot-6); ctx.stroke(); }
   }
 
+  // ---- accessoire thématique du personnage débloqué (par-dessus le casque de base) ----
+  const accessory = charDef && charDef.accessory;
+  if(accessory === 'headband'){
+    ctx.fillStyle = '#d81c1c';
+    ctx.fillRect(headCX-headR*0.95, headCY-headR*0.6, headR*1.9, headR*0.32);
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(headCX, headCY-headR*0.44, headR*0.14, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#d81c1c';
+    ctx.fillRect(headCX+headR*0.85, headCY-headR*0.55, headR*0.5, headR*0.16);
+    ctx.fillRect(headCX+headR*0.85, headCY-headR*0.3, headR*0.5, headR*0.16);
+  } else if(accessory === 'mask'){
+    ctx.fillStyle = pal.accent;
+    ctx.fillRect(headCX-headR*0.85, headCY-headR*0.05, headR*1.7, headR*0.62);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(headCX-headR*0.85, headCY-headR*0.05, headR*1.7, headR*0.14);
+  } else if(accessory === 'jersey'){
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.round(headR*1.05)}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.fillText(charDef.number || '9', w*0.5, torsoTop + torsoH*0.62);
+    ctx.textAlign = 'left';
+  } else if(accessory === 'crown'){
+    ctx.fillStyle = '#ffd23c';
+    ctx.beginPath();
+    ctx.moveTo(headCX-headR*0.85, headCY-headR*0.95);
+    ctx.lineTo(headCX-headR*0.42, headCY-headR*1.45);
+    ctx.lineTo(headCX, headCY-headR*0.98);
+    ctx.lineTo(headCX+headR*0.42, headCY-headR*1.45);
+    ctx.lineTo(headCX+headR*0.85, headCY-headR*0.95);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff6c8';
+    ctx.beginPath(); ctx.arc(headCX, headCY-headR*1.4, headR*0.1, 0, Math.PI*2); ctx.fill();
+  }
+
   ctx.restore();
 }
 
@@ -586,51 +870,223 @@ function drawEnemySprite(kind, x, y, w, h, tick, dir){
 }
 
 function drawBossSprite(kind, x, y, w, h, tick, dir){
-  ctx.save(); ctx.translate(x, y);
+  const bob = Math.sin(tick*0.09) * 3; // respiration lente : le boss semble plus imposant et vivant
+  const pulse = 0.55 + 0.45*Math.sin(tick*0.12);
+
+  ctx.save();
+  // Ombre au sol, ancrée (ne suit pas le bob vertical)
+  ctx.translate(x, y);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath(); ctx.ellipse(w*0.5, h+8, w*0.52, 9, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  ctx.save(); ctx.translate(x, y + bob);
   if(dir < 0){ ctx.translate(w, 0); ctx.scale(-1, 1); }
 
   if(kind === 'thug_boss'){
-    const tGrad = ctx.createLinearGradient(w*0.15,h*0.32,w*0.85,h*0.32);
-    tGrad.addColorStop(0,'#0f0f13'); tGrad.addColorStop(0.5,'#22222c'); tGrad.addColorStop(1,'#0f0f13');
+    // Aura sombre pulsante autour du caïd
+    const auraG = ctx.createRadialGradient(w*0.5,h*0.45,w*0.08,w*0.5,h*0.45,w*0.85);
+    auraG.addColorStop(0, `rgba(70,130,255,${0.26*pulse})`); auraG.addColorStop(1, 'rgba(70,130,255,0)');
+    ctx.fillStyle = auraG; ctx.beginPath(); ctx.arc(w*0.5,h*0.45,w*0.85,0,Math.PI*2); ctx.fill();
+
+    // Long manteau qui ondule
+    const capeG = ctx.createLinearGradient(0,h*0.3,0,h*1.02);
+    capeG.addColorStop(0,'#1c1c26'); capeG.addColorStop(1,'#050507');
+    ctx.fillStyle = capeG;
+    ctx.beginPath();
+    ctx.moveTo(w*0.14,h*0.36);
+    ctx.quadraticCurveTo(w*0.0+Math.sin(tick*0.15)*4, h*0.75, w*0.1, h*1.0);
+    ctx.lineTo(w*0.9, h*1.0);
+    ctx.quadraticCurveTo(w*1.0-Math.sin(tick*0.15)*4, h*0.75, w*0.86,h*0.36);
+    ctx.closePath(); ctx.fill();
+
+    // Torse : hoodie premium noir/bleu avec dégradé
+    const tGrad = ctx.createLinearGradient(w*0.16,h*0.3,w*0.84,h*0.3);
+    tGrad.addColorStop(0,'#0a0a0e'); tGrad.addColorStop(0.5,'#2c2c38'); tGrad.addColorStop(1,'#0a0a0e');
     ctx.fillStyle = tGrad;
-    ctx.fillRect(w*0.15,h*0.32,w*0.7,h*0.58);
+    roundRectPath(w*0.16,h*0.3,w*0.68,h*0.56,10); ctx.fill();
     ctx.fillStyle = '#2f6fe0';
-    ctx.fillRect(w*0.15,h*0.32,4,h*0.58); ctx.fillRect(w*0.81,h*0.32,4,h*0.58);
+    ctx.fillRect(w*0.16,h*0.3,5,h*0.56); ctx.fillRect(w*0.79,h*0.3,5,h*0.56);
+
+    // Grosse chaîne en or
+    ctx.strokeStyle = '#f0c94a'; ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.moveTo(w*0.32,h*0.36); ctx.quadraticCurveTo(w*0.5,h*0.52,w*0.68,h*0.36); ctx.stroke();
+    ctx.fillStyle = '#f0c94a'; ctx.beginPath(); ctx.arc(w*0.5,h*0.5,5,0,Math.PI*2); ctx.fill();
+
+    // Bras massifs croisés
+    ctx.fillStyle = '#14141a';
+    ctx.beginPath(); ctx.ellipse(w*0.26,h*0.58,w*0.15,h*0.1,0.4,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(w*0.74,h*0.58,w*0.15,h*0.1,-0.4,0,Math.PI*2); ctx.fill();
+
+    // Tête, capuche dans l'ombre
     ctx.fillStyle = '#c9884f';
-    ctx.beginPath(); ctx.arc(w*0.5,h*0.18,w*0.28,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.moveTo(w*0.34,h*0.34); ctx.quadraticCurveTo(w*0.5,h*0.46,w*0.66,h*0.34); ctx.stroke();
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(w*0.38,h*0.15,6,6); ctx.fillRect(w*0.56,h*0.15,6,6);
-    ctx.fillRect(w*0.36,h*0.08,0.28*w,3);
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.16,w*0.25,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(8,8,12,0.55)';
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.13,w*0.27,Math.PI,0); ctx.fill();
+
+    // Yeux rouges luminescents (menaçant)
+    const eyeGlow = 0.6+0.4*Math.sin(tick*0.3);
+    ctx.fillStyle = `rgba(255,60,60,${eyeGlow})`;
+    ctx.beginPath(); ctx.arc(w*0.41,h*0.16,2.6,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(w*0.59,h*0.16,2.6,0,Math.PI*2); ctx.fill();
+
+    // Bandeau doré
+    ctx.fillStyle = '#f0c94a'; ctx.fillRect(w*0.27,h*0.085,0.46*w,4);
+
   } else if(kind === 'pharaoh_boss'){
+    const auraG = ctx.createRadialGradient(w*0.5,h*0.4,w*0.08,w*0.5,h*0.4,w*0.9);
+    auraG.addColorStop(0, `rgba(255,205,90,${0.28*pulse})`); auraG.addColorStop(1, 'rgba(255,205,90,0)');
+    ctx.fillStyle = auraG; ctx.beginPath(); ctx.arc(w*0.5,h*0.4,w*0.9,0,Math.PI*2); ctx.fill();
+
+    // Cape dorée translucide flottante
+    ctx.fillStyle = 'rgba(212,175,55,0.5)';
+    ctx.beginPath();
+    ctx.moveTo(w*0.18,h*0.4); ctx.quadraticCurveTo(w*0.0, h*0.8+Math.sin(tick*0.15)*5, w*0.14, h*1.02);
+    ctx.lineTo(w*0.86,h*1.02);
+    ctx.quadraticCurveTo(w*1.0, h*0.8-Math.sin(tick*0.15)*5, w*0.82,h*0.4);
+    ctx.closePath(); ctx.fill();
+
+    // Armure bleu royal, ombrée
+    const bGrad = ctx.createLinearGradient(w*0.2,h*0.34,w*0.8,h*0.34);
+    bGrad.addColorStop(0,'#12225c'); bGrad.addColorStop(0.5,'#2b4bb0'); bGrad.addColorStop(1,'#12225c');
+    ctx.fillStyle = bGrad;
+    roundRectPath(w*0.2,h*0.34,w*0.6,h*0.56,8); ctx.fill();
+    ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 2.4;
+    ctx.strokeRect(w*0.2,h*0.34,w*0.6,h*0.56);
+
+    // Pectoral décoré en losange doré
+    ctx.fillStyle = '#d4af37';
+    ctx.beginPath(); ctx.moveTo(w*0.5,h*0.4); ctx.lineTo(w*0.62,h*0.5); ctx.lineTo(w*0.5,h*0.58); ctx.lineTo(w*0.38,h*0.5); ctx.closePath(); ctx.fill();
+
+    // Némès rayé or/bleu
+    ctx.fillStyle = '#d4af37';
+    ctx.beginPath(); ctx.moveTo(w*0.12,h*0.34); ctx.lineTo(w*0.5,h*0.02); ctx.lineTo(w*0.88,h*0.34); ctx.closePath(); ctx.fill();
     ctx.fillStyle = '#1c3f8f';
-    ctx.fillRect(w*0.2,h*0.36,w*0.6,h*0.54);
-    ctx.fillStyle = '#d4af37';
-    ctx.beginPath(); ctx.moveTo(w*0.14,h*0.36); ctx.lineTo(w*0.5,h*0.04); ctx.lineTo(w*0.86,h*0.36); ctx.fill();
+    for(let i=0;i<4;i++){ ctx.fillRect(w*0.22+i*w*0.14, h*0.1+i*0.5, w*0.07, h*0.24-i*2); }
+
+    // Visage
     ctx.fillStyle = '#c9884f';
-    ctx.beginPath(); ctx.arc(w*0.5,h*0.28,w*0.2,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#1a1a1a'; ctx.fillRect(w*0.42,h*0.25,5,5); ctx.fillRect(w*0.55,h*0.25,5,5);
-    ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.moveTo(w*0.88,h*0.2); ctx.lineTo(w*0.88,h*0.92); ctx.stroke();
-    ctx.beginPath(); ctx.arc(w*0.88,h*0.18,7,0,Math.PI*2); ctx.fillStyle='#d4af37'; ctx.fill();
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.26,w*0.18,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#1a1a1a'; ctx.fillRect(w*0.43,h*0.23,4.5,4.5); ctx.fillRect(w*0.55,h*0.23,4.5,4.5);
+
+    // Uraeus doré lumineux au front
+    const glow2 = 0.5+0.5*Math.sin(tick*0.25);
+    ctx.fillStyle = `rgba(212,175,55,${0.7+0.3*glow2})`;
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.09,4,0,Math.PI*2); ctx.fill();
+
+    // Bâton ankh
+    ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(w*0.9,h*0.2); ctx.lineTo(w*0.9,h*0.95); ctx.stroke();
+    ctx.beginPath(); ctx.arc(w*0.9,h*0.15,7,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(w*0.82,h*0.28); ctx.lineTo(w*0.98,h*0.28); ctx.stroke();
+
   } else if(kind === 'tree_boss'){
-    ctx.fillStyle = '#4b3621';
-    ctx.fillRect(w*0.3,h*0.42,w*0.4,h*0.5);
-    ctx.fillStyle = '#2f6b32';
-    ctx.beginPath(); ctx.arc(w*0.5,h*0.28,w*0.42,0,Math.PI*2); ctx.fill();
-    const glow = 0.6+0.4*Math.sin(tick*0.2);
-    ctx.fillStyle = `rgba(155,227,106,${glow})`;
-    ctx.beginPath(); ctx.arc(w*0.38,h*0.24,6,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(w*0.6,h*0.24,6,0,Math.PI*2); ctx.fill();
+    const auraG = ctx.createRadialGradient(w*0.5,h*0.35,w*0.08,w*0.5,h*0.35,w*0.9);
+    auraG.addColorStop(0, `rgba(120,230,110,${0.28*pulse})`); auraG.addColorStop(1, 'rgba(120,230,110,0)');
+    ctx.fillStyle = auraG; ctx.beginPath(); ctx.arc(w*0.5,h*0.35,w*0.9,0,Math.PI*2); ctx.fill();
+
+    // Bras-branches noueux
+    ctx.strokeStyle = '#4b3621'; ctx.lineWidth = 8; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(w*0.28,h*0.5); ctx.quadraticCurveTo(w*0.05,h*0.42+Math.sin(tick*0.1)*4,w*0.0,h*0.6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(w*0.72,h*0.5); ctx.quadraticCurveTo(w*0.95,h*0.42-Math.sin(tick*0.1)*4,w*1.0,h*0.6); ctx.stroke();
+
+    // Tronc texturé
+    const trunkG = ctx.createLinearGradient(w*0.28,h*0.4,w*0.72,h*0.4);
+    trunkG.addColorStop(0,'#2e2013'); trunkG.addColorStop(0.5,'#5a4028'); trunkG.addColorStop(1,'#2e2013');
+    ctx.fillStyle = trunkG;
+    ctx.beginPath(); ctx.moveTo(w*0.3,h*1.0); ctx.quadraticCurveTo(w*0.22,h*0.65,w*0.32,h*0.4); ctx.lineTo(w*0.68,h*0.4); ctx.quadraticCurveTo(w*0.78,h*0.65,w*0.7,h*1.0); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(20,14,8,0.5)'; ctx.lineWidth = 1.6;
+    for(let i=0;i<4;i++){ ctx.beginPath(); ctx.moveTo(w*0.36+i*w*0.08,h*0.45); ctx.lineTo(w*0.34+i*w*0.08,h*0.95); ctx.stroke(); }
+
+    // Feuillage double couche avec dégradé
+    ctx.fillStyle = '#1f5423';
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.26,w*0.48,0,Math.PI*2); ctx.fill();
+    const foliageG = ctx.createRadialGradient(w*0.4,h*0.18,4,w*0.5,h*0.26,w*0.44);
+    foliageG.addColorStop(0,'#5fbf5a'); foliageG.addColorStop(1,'#2c7a34');
+    ctx.fillStyle = foliageG;
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.24,w*0.42,0,Math.PI*2); ctx.fill();
+
+    // Visage sculpté dans l'écorce
+    ctx.fillStyle = 'rgba(20,14,8,0.5)';
+    ctx.beginPath(); ctx.ellipse(w*0.5,h*0.62,w*0.14,h*0.1,0,0,Math.PI*2); ctx.fill();
+
+    // Yeux luminescents
+    const eGlow = 0.6+0.4*Math.sin(tick*0.2);
+    ctx.fillStyle = `rgba(180,255,140,${eGlow})`;
+    ctx.beginPath(); ctx.arc(w*0.4,h*0.2,5,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(w*0.6,h*0.2,5,0,Math.PI*2); ctx.fill();
+
+    // Lucioles/pollen flottant autour de la cime
+    ctx.fillStyle = `rgba(210,255,170,${0.5+0.5*Math.sin(tick*0.4)})`;
+    for(let i=0;i<3;i++){
+      const ang = tick*0.05 + i*2.1;
+      ctx.beginPath(); ctx.arc(w*0.5+Math.cos(ang)*w*0.5, h*0.3+Math.sin(ang)*h*0.22, 2.4, 0, Math.PI*2); ctx.fill();
+    }
+
   } else if(kind === 'ice_boss'){
+    const auraG = ctx.createRadialGradient(w*0.5,h*0.4,w*0.08,w*0.5,h*0.4,w*0.9);
+    auraG.addColorStop(0, `rgba(140,210,255,${0.28*pulse})`); auraG.addColorStop(1, 'rgba(140,210,255,0)');
+    ctx.fillStyle = auraG; ctx.beginPath(); ctx.arc(w*0.5,h*0.4,w*0.9,0,Math.PI*2); ctx.fill();
+
+    // Cape de glace translucide
+    ctx.fillStyle = 'rgba(180,225,250,0.4)';
+    ctx.beginPath();
+    ctx.moveTo(w*0.16,h*0.4); ctx.quadraticCurveTo(w*0.0, h*0.8+Math.sin(tick*0.15)*5, w*0.12, h*1.02);
+    ctx.lineTo(w*0.88,h*1.02);
+    ctx.quadraticCurveTo(w*1.0, h*0.8-Math.sin(tick*0.15)*5, w*0.84,h*0.4);
+    ctx.closePath(); ctx.fill();
+
+    // Corps cristallin avec dégradé
+    const iceG = ctx.createLinearGradient(w*0.2,h*0.32,w*0.8,h*0.32);
+    iceG.addColorStop(0,'#c7e8fb'); iceG.addColorStop(0.5,'#eef8ff'); iceG.addColorStop(1,'#c7e8fb');
+    ctx.fillStyle = iceG;
+    roundRectPath(w*0.2,h*0.32,w*0.6,h*0.58,10); ctx.fill();
+    ctx.strokeStyle = 'rgba(120,180,220,0.6)'; ctx.lineWidth = 2;
+    ctx.strokeRect(w*0.2,h*0.32,w*0.6,h*0.58);
+
+    // Facette cristalline interne
+    ctx.fillStyle = 'rgba(159,212,238,0.6)';
+    ctx.beginPath(); ctx.moveTo(w*0.5,h*0.32); ctx.lineTo(w*0.3,h*0.6); ctx.lineTo(w*0.7,h*0.6); ctx.closePath(); ctx.fill();
+
+    // Couronne de glace
     ctx.fillStyle = '#dff0fb';
-    ctx.fillRect(w*0.22,h*0.36,w*0.56,h*0.54);
-    ctx.fillStyle = '#9fd4ee';
-    ctx.beginPath(); ctx.moveTo(w*0.5,h*0.36); ctx.lineTo(w*0.28,h*0.62); ctx.lineTo(w*0.72,h*0.62); ctx.fill();
-    ctx.fillStyle = '#d4af37';
-    ctx.beginPath(); ctx.moveTo(w*0.3,h*0.3); ctx.lineTo(w*0.5,h*0.04); ctx.lineTo(w*0.7,h*0.3); ctx.fill();
-    ctx.fillStyle = '#1a1a1a'; ctx.fillRect(w*0.4,h*0.3,5,5); ctx.fillRect(w*0.56,h*0.3,5,5);
+    ctx.beginPath();
+    ctx.moveTo(w*0.22,h*0.3); ctx.lineTo(w*0.3,h*0.02); ctx.lineTo(w*0.42,h*0.22); ctx.lineTo(w*0.5,h*-0.02); ctx.lineTo(w*0.58,h*0.22); ctx.lineTo(w*0.7,h*0.02); ctx.lineTo(w*0.78,h*0.3);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(120,180,220,0.7)'; ctx.lineWidth = 1.4; ctx.stroke();
+
+    // Yeux glacés luminescents
+    const eyeGlow2 = 0.6+0.4*Math.sin(tick*0.3);
+    ctx.fillStyle = `rgba(90,190,255,${eyeGlow2})`;
+    ctx.beginPath(); ctx.arc(w*0.42,h*0.42,3.4,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(w*0.58,h*0.42,3.4,0,Math.PI*2); ctx.fill();
+
+    // Éclats de givre flottants
+    ctx.fillStyle = `rgba(255,255,255,${0.5+0.5*Math.sin(tick*0.35)})`;
+    for(let i=0;i<4;i++){
+      const ang = tick*0.04 + i*1.6;
+      ctx.beginPath(); ctx.arc(w*0.5+Math.cos(ang)*w*0.55, h*0.5+Math.sin(ang)*h*0.35, 2, 0, Math.PI*2); ctx.fill();
+    }
+  }
+
+  ctx.restore();
+}
+
+// Mur d'énergie infranchissable qui bloque l'accès au drapeau tant que le boss du niveau est vivant
+function drawBossBarrier(bx, theme, tick){
+  ctx.save();
+  const pulse = 0.5 + 0.5*Math.sin(tick*0.08);
+  const grad = ctx.createLinearGradient(bx-20,0,bx+20,0);
+  grad.addColorStop(0, 'rgba(255,255,255,0)');
+  grad.addColorStop(0.5, `rgba(${theme.accent[0]},${theme.accent[1]},${theme.accent[2]},${0.32+0.22*pulse})`);
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(bx-20, -60, 40, HEIGHT+120);
+  ctx.strokeStyle = `rgba(255,255,255,${0.45+0.3*pulse})`;
+  ctx.lineWidth = 2;
+  for(let ly=-30; ly<HEIGHT+60; ly+=28){
+    const off = (tick*1.4 + ly*0.3) % 28;
+    ctx.beginPath(); ctx.moveTo(bx-11, ly+off); ctx.lineTo(bx+11, ly+off-15); ctx.stroke();
   }
   ctx.restore();
 }
@@ -651,12 +1107,25 @@ function drawStar(cx, cy, rOuter, rInner, color){
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const STATE_MENU = 0, STATE_PLAYING = 1, STATE_LEVEL_CLEAR = 2, STATE_GAME_OVER = 3, STATE_VICTORY = 4, STATE_MAP = 5;
+const STATE_DEVICE = -1, STATE_MENU = 0, STATE_PLAYING = 1, STATE_LEVEL_CLEAR = 2, STATE_GAME_OVER = 3, STATE_VICTORY = 4, STATE_MAP = 5, STATE_CHARACTER = 6;
 const LEVELS_PER_WORLD = LEVEL_NAMES.length; // 5 (4 niveaux + 1 boss)
 function FLAT(w, l){ return w * LEVELS_PER_WORLD + l; }
 
-let state = STATE_MENU, worldIndex = 0, levelIndex = 0, lives = 3, score = 0, cameraX = 0, levelTransitionTimer = 0, frameTick = 0;
+let state = STATE_DEVICE, worldIndex = 0, levelIndex = 0, lives = 3, score = 0, cameraX = 0, levelTransitionTimer = 0, frameTick = 0;
 let level = null, player = new Player(), enemies = [], keys = {};
+let projectiles = [];
+let stateBeforeDevice = STATE_MENU; // état vers lequel revenir une fois l'appareil choisi
+
+// ---- Appareil (choisi au lancement) et personnage sélectionné ----
+let isMobile = false;
+let currentCharacterId = 'zkr';
+let charCursor = 0; // index du personnage survolé dans l'écran de sélection
+
+// ---- Statistiques de progression (servent aux quêtes de déblocage des personnages) ----
+let totalCoinsAllTime = 0;
+let bossesDefeated = 0;
+let worldsCompletedCount = 0;
+let victoriesCount = 0;
 
 // ---- Progression / checkpoints (façon carte du monde Mario) ----
 let unlockedFlat = 0;           // plus grand niveau déjà débloqué (index à plat monde*5+niveau)
@@ -671,6 +1140,7 @@ function initLevel(){
   enemies = level.enemyData.map(e => new Enemy(e.x, e.y, e.left, e.right, e.speed, {
     ...e, kind: e.isBoss ? BOSS_KINDS[worldIndex] : ENEMY_KINDS[worldIndex]
   }));
+  projectiles = [];
   cameraX = 0;
 }
 
@@ -700,36 +1170,125 @@ function tryLaunchFromMap(){
   state = STATE_PLAYING; initLevel();
 }
 
+function openCharacterSelect(){
+  charCursor = Math.max(0, CHARACTERS.findIndex(c => c.id === currentCharacterId));
+  state = STATE_CHARACTER;
+}
+
+function trySelectCharacter(){
+  const c = CHARACTERS[charCursor];
+  if(c && c.isUnlocked()) currentCharacterId = c.id;
+}
+
+// Attaque à distance : tire un projectile dans la direction où regarde le joueur.
+// Limité par un cooldown (SHOOT_COOLDOWN) pour éviter le spam. Fonctionne au sol comme en l'air.
+function tryShoot(){
+  if(state !== STATE_PLAYING || player.shootCooldown > 0) return;
+  const char = getCharacter(currentCharacterId);
+  const originX = player.facing > 0 ? player.x + player.w : player.x - 16;
+  const originY = player.y + player.h * 0.42;
+  projectiles.push(new Projectile(originX, originY, player.facing, char.palette.accentLight));
+  player.shootCooldown = SHOOT_COOLDOWN;
+}
+
+// ===================== GESTION DES ENTRÉES (clavier ET boutons tactiles) =====================
+// Toute la logique de "quelle touche déclenche quelle action selon l'état du jeu" est centralisée
+// ici, pour être appelée aussi bien par un vrai événement clavier que par un bouton tactile.
+function onKeyPress(key){
+  if(state === STATE_DEVICE){
+    return; // le choix d'appareil se fait via les boutons HTML, pas au clavier
+  } else if(state === STATE_MENU){
+    if(key === ' ') startNewGame();
+    else if(key === 'm' || key === 'M') openMap(false);
+    else if(key === 'c' || key === 'C') openCharacterSelect();
+  } else if(state === STATE_GAME_OVER){
+    if(key === ' ') respawnAtCheckpoint();
+    else if(key === 'm' || key === 'M') openMap(false);
+  } else if(state === STATE_VICTORY){
+    if(key === ' ') startNewGame();
+    else if(key === 'm' || key === 'M') openMap(false);
+  } else if(state === STATE_PLAYING){
+    if(key === 'Escape') openMap(true);
+  } else if(state === STATE_MAP){
+    if(key === 'ArrowLeft') mapCursorLevel = Math.max(0, mapCursorLevel - 1);
+    else if(key === 'ArrowRight') mapCursorLevel = Math.min(LEVELS_PER_WORLD - 1, mapCursorLevel + 1);
+    else if(key === 'ArrowUp') mapCursorWorld = Math.max(0, mapCursorWorld - 1);
+    else if(key === 'ArrowDown') mapCursorWorld = Math.min(WORLD_THEMES.length - 1, mapCursorWorld + 1);
+    else if(key === ' ' || key === 'Enter') tryLaunchFromMap();
+    else if(key === 'Escape') state = mapReturnsToPlay ? STATE_PLAYING : STATE_MENU;
+  } else if(state === STATE_CHARACTER){
+    if(key === 'ArrowLeft') charCursor = Math.max(0, charCursor - 1);
+    else if(key === 'ArrowRight') charCursor = Math.min(CHARACTERS.length - 1, charCursor + 1);
+    else if(key === ' ' || key === 'Enter') trySelectCharacter();
+    else if(key === 'Escape') state = STATE_MENU;
+  }
+}
+
 const HANDLED_KEYS = [' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Escape'];
 window.addEventListener('keydown', e => {
   if(HANDLED_KEYS.includes(e.key)) e.preventDefault(); // évite que la page défile pendant qu'on joue
+  const isNewPress = !keys[e.key];
   keys[e.key] = true;
-
-  if(state === STATE_MENU){
-    if(e.key === ' ') startNewGame();
-    else if(e.key === 'm' || e.key === 'M') openMap(false);
-  } else if(state === STATE_GAME_OVER){
-    if(e.key === ' ') respawnAtCheckpoint();
-    else if(e.key === 'm' || e.key === 'M') openMap(false);
-  } else if(state === STATE_VICTORY){
-    if(e.key === ' ') startNewGame();
-    else if(e.key === 'm' || e.key === 'M') openMap(false);
-  } else if(state === STATE_PLAYING){
-    if(e.key === 'Escape') openMap(true);
-  } else if(state === STATE_MAP){
-    if(e.key === 'ArrowLeft') mapCursorLevel = Math.max(0, mapCursorLevel - 1);
-    else if(e.key === 'ArrowRight') mapCursorLevel = Math.min(LEVELS_PER_WORLD - 1, mapCursorLevel + 1);
-    else if(e.key === 'ArrowUp') mapCursorWorld = Math.max(0, mapCursorWorld - 1);
-    else if(e.key === 'ArrowDown') mapCursorWorld = Math.min(WORLD_THEMES.length - 1, mapCursorWorld + 1);
-    else if(e.key === ' ' || e.key === 'Enter') tryLaunchFromMap();
-    else if(e.key === 'Escape') state = mapReturnsToPlay ? STATE_PLAYING : STATE_MENU;
-  }
+  if(isNewPress) onKeyPress(e.key); // une seule action par pression, pas de répétition en boucle
 });
 window.addEventListener('keyup', e => { keys[e.key] = false; });
 window.addEventListener('blur', () => { keys = {}; }); // évite les touches "bloquées" si la fenêtre perd le focus
 
 // On force le clic sur le canvas à donner le focus
 canvas.addEventListener('click', () => { canvas.focus(); });
+
+// ---- Écran de choix d'appareil (PC ou mobile), affiché au tout premier lancement ----
+const deviceOverlay = document.getElementById('deviceOverlay');
+const touchControls = document.getElementById('touchControls');
+const hintEl = document.getElementById('hint');
+
+function chooseDevice(mobile){
+  isMobile = mobile;
+  deviceOverlay.classList.add('hidden');
+  // Déverrouille l'audio pendant ce clic (geste utilisateur) pour que les musiques puissent démarrer sans être bloquées par le navigateur.
+  Object.values(MUSIC).forEach(a => { a.play().then(() => a.pause()).catch(() => {}); });
+  if(isMobile){
+    touchControls.classList.add('active');
+    hintEl.textContent = 'Boutons en bas : bouger / sauter / s\'accroupir / TIR à distance  |  ☰ : carte des niveaux / personnages';
+  } else {
+    touchControls.classList.remove('active');
+  }
+  state = STATE_MENU;
+  canvas.focus();
+}
+document.getElementById('btnMobile').addEventListener('click', () => chooseDevice(true));
+document.getElementById('btnPC').addEventListener('click', () => chooseDevice(false));
+
+// ---- Boutons tactiles : ils pilotent le même objet `keys` que le clavier ----
+function bindTouchButton(id, key){
+  const el = document.getElementById(id);
+  const press = (ev) => {
+    ev.preventDefault();
+    if(!keys[key]) onKeyPress(key);
+    keys[key] = true;
+  };
+  const release = (ev) => { if(ev) ev.preventDefault(); keys[key] = false; };
+  el.addEventListener('pointerdown', press);
+  el.addEventListener('pointerup', release);
+  el.addEventListener('pointerleave', release);
+  el.addEventListener('pointercancel', release);
+}
+bindTouchButton('tcLeft', 'ArrowLeft');
+bindTouchButton('tcRight', 'ArrowRight');
+bindTouchButton('tcDown', 'ArrowDown');
+bindTouchButton('tcJump', ' ');
+bindTouchButton('tcShoot', 'e');
+// Le bouton "menu" agit comme Échap en jeu, et comme retour dans les écrans de menu/carte/perso
+document.getElementById('tcMenu').addEventListener('pointerdown', (ev) => {
+  ev.preventDefault();
+  if(state === STATE_PLAYING) onKeyPress('Escape');
+  else if(state === STATE_MAP || state === STATE_CHARACTER) onKeyPress('Escape');
+  else if(state === STATE_MENU) openMap(false);
+});
+document.getElementById('tcPerso').addEventListener('pointerdown', (ev) => {
+  ev.preventDefault();
+  if(state === STATE_MENU) openCharacterSelect();
+});
 
 function drawCenterText(lines, offset=0){
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -791,6 +1350,56 @@ function drawMapScreen(){
 
   ctx.textAlign = 'center'; ctx.font = '15px Arial'; ctx.fillStyle = '#ccc';
   ctx.fillText('Flèches : naviguer   |   ESPACE / ENTRÉE : jouer   |   ÉCHAP : retour', WIDTH/2, HEIGHT - 28);
+}
+
+function drawCharacterScreen(){
+  let g = ctx.createLinearGradient(0,0,0,HEIGHT); g.addColorStop(0, '#140f28'); g.addColorStop(1, '#3c2e6b');
+  ctx.fillStyle = g; ctx.fillRect(0,0,WIDTH,HEIGHT);
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 26px Arial'; ctx.fillStyle = '#fff';
+  ctx.fillText('CHOISIS TON PERSONNAGE', WIDTH/2, 42);
+
+  const c = CHARACTERS[charCursor];
+  const unlocked = c.isUnlocked();
+
+  // Grande vignette du personnage survolé au centre
+  const previewCX = WIDTH/2, previewCY = 190;
+  ctx.save();
+  if(!unlocked) ctx.globalAlpha = 0.35;
+  drawPlayerSprite(previewCX - PLAYER_WIDTH*1.1, previewCY - PLAYER_HEIGHT*1.1, PLAYER_WIDTH*2.2, PLAYER_HEIGHT*2.2, 1, 0, true, false, frameTick, c);
+  ctx.restore();
+
+  ctx.font = 'bold 22px Arial'; ctx.fillStyle = unlocked ? '#ffd700' : '#999';
+  ctx.fillText(c.name, WIDTH/2, 330);
+  ctx.font = '15px Arial'; ctx.fillStyle = '#ccc';
+  ctx.fillText(c.theme, WIDTH/2, 356);
+
+  ctx.font = 'bold 15px Arial';
+  if(unlocked){
+    ctx.fillStyle = c.id === currentCharacterId ? '#7CFC98' : '#fff';
+    ctx.fillText(c.id === currentCharacterId ? '✔ ÉQUIPÉ' : 'ESPACE / ENTRÉE : équiper', WIDTH/2, 388);
+  } else {
+    ctx.fillStyle = '#ff8a6b';
+    ctx.fillText('🔒 ' + c.quest, WIDTH/2, 388);
+  }
+
+  // Flèches gauche/droite + petites pastilles indiquant la position dans la liste
+  ctx.font = 'bold 28px Arial'; ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  if(charCursor > 0) ctx.fillText('◀', 70, previewCY);
+  if(charCursor < CHARACTERS.length - 1) ctx.fillText('▶', WIDTH-70, previewCY);
+
+  const dotY = 430, dotGap = 22, dotStartX = WIDTH/2 - (CHARACTERS.length-1)*dotGap/2;
+  CHARACTERS.forEach((cc, i) => {
+    ctx.beginPath();
+    ctx.fillStyle = i === charCursor ? '#ffd700' : (cc.isUnlocked() ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.2)');
+    ctx.arc(dotStartX + i*dotGap, dotY, i === charCursor ? 6 : 4, 0, Math.PI*2);
+    ctx.fill();
+  });
+
+  ctx.font = '15px Arial'; ctx.fillStyle = '#ccc';
+  ctx.fillText('Flèches ◀▶ : parcourir   |   ESPACE / ENTRÉE : équiper   |   ÉCHAP : retour', WIDTH/2, HEIGHT - 28);
+  ctx.textAlign = 'left';
 }
 
 function drawWorldDeco(worldIdx, camX) {
@@ -961,12 +1570,16 @@ function damagePlayer(){
 function gameLoop(){
   frameTick++;
   if(state === STATE_PLAYING){
+    level.movingPlatforms.forEach(mp => mp.update(frameTick));
     player.update(keys, level.solids);
     cameraX += ((player.x - WIDTH/3) - cameraX) * 0.1;
     cameraX = Math.max(0, Math.min(cameraX, level.width - WIDTH));
 
+    // Attaque à distance : maintenir E (ou le bouton TIR tactile) tire en continu, limité par le cooldown
+    if(keys['e'] || keys['E']) tryShoot();
+
     if(player.y > DEATH_Y) damagePlayer();
-    level.coins.forEach(c => { if(!c.taken && Math.hypot(player.x+player.w/2 - c.x, player.y+player.h/2 - c.y) < 35){ c.taken = true; score++; } });
+    level.coins.forEach(c => { if(!c.taken && Math.hypot(player.x+player.w/2 - c.x, player.y+player.h/2 - c.y) < 35){ c.taken = true; score++; totalCoinsAllTime++; } });
     enemies.forEach(e => {
       if(state !== STATE_PLAYING || !e.alive) return;
       e.update();
@@ -974,22 +1587,48 @@ function gameLoop(){
         if(player.vy > 0 && player.y + player.h - player.vy <= e.y + 15){
           e.hit(); player.vy = -10;
           score += e.alive ? 1 : (e.isBoss ? 20 : 2);
+          if(e.isBoss && !e.alive) bossesDefeated++;
         } else if(player.invincibleTimer <= 0){ damagePlayer(); }
       }
     });
+
+    // Mise à jour des projectiles : déplacement, disparition sur mur/expiration, et dégâts aux ennemis
+    // (même effet qu'un saut sur la tête : élimine les petits mobs en un coup, inflige 1 point de dégât aux boss).
+    projectiles.forEach(p => { if(!p.dead) p.update(level.solids); });
+    enemies.forEach(e => {
+      if(!e.alive) return;
+      for(const p of projectiles){
+        if(!p.dead && rectsOverlap(p.rect, e.rect)){
+          p.dead = true;
+          e.hit();
+          score += e.alive ? 1 : (e.isBoss ? 20 : 2);
+          if(e.isBoss && !e.alive) bossesDefeated++;
+          break;
+        }
+      }
+    });
+    projectiles = projectiles.filter(p => !p.dead);
+
     if(state === STATE_PLAYING){
       level.spikes.forEach(s => { if(state === STATE_PLAYING && rectsOverlap(player.rect, s) && player.invincibleTimer <= 0) damagePlayer(); });
     }
-    if(state === STATE_PLAYING && player.x + player.w > level.goalX && Math.abs((player.y + player.h) - level.goalY) < 120){ state = STATE_LEVEL_CLEAR; levelTransitionTimer = 60; }
+    // Barrière de boss : tant que le boss du niveau est vivant, un mur invisible empêche
+    // physiquement d'atteindre le drapeau (on ne peut pas "skip" le combat).
+    const bossAlive = enemies.some(e => e.isBoss && e.alive);
+    if(level.bossBarrierX != null && bossAlive && player.x + player.w > level.bossBarrierX){
+      player.x = level.bossBarrierX - player.w;
+      if(player.vx > 0) player.vx = 0;
+    }
+    if(state === STATE_PLAYING && !bossAlive && player.x + player.w > level.goalX && Math.abs((player.y + player.h) - level.goalY) < 120){ state = STATE_LEVEL_CLEAR; levelTransitionTimer = 60; }
   } else if(state === STATE_LEVEL_CLEAR){
     levelTransitionTimer--;
     if(levelTransitionTimer <= 0){
       levelIndex++;
       if(levelIndex >= LEVELS_PER_WORLD){
-        levelIndex = 0; worldIndex++;
+        levelIndex = 0; worldIndex++; worldsCompletedCount++;
         if(worldIndex >= WORLD_THEMES.length){
           unlockedFlat = FLAT(WORLD_THEMES.length - 1, LEVELS_PER_WORLD - 1);
-          state = STATE_VICTORY;
+          state = STATE_VICTORY; victoriesCount++;
         } else {
           checkpointWorld = worldIndex; checkpointScore = score; // nouveau monde = nouveau checkpoint
           unlockedFlat = Math.max(unlockedFlat, FLAT(worldIndex, levelIndex));
@@ -1002,19 +1641,36 @@ function gameLoop(){
     }
   }
 
+  const tcPersoEl = document.getElementById('tcPerso');
+  if(tcPersoEl) tcPersoEl.classList.toggle('show', isMobile && state === STATE_MENU);
+
+  updateMusic();
+
   ctx.clearRect(0,0,WIDTH,HEIGHT);
   const theme = WORLD_THEMES[Math.min(worldIndex, WORLD_THEMES.length - 1)];
 
-  if(state === STATE_MENU){
+  if(state === STATE_DEVICE){
+    // Le fond reste simple : la vraie interface de choix est la surcouche HTML #deviceOverlay au-dessus du canvas.
     let g = ctx.createLinearGradient(0,0,0,HEIGHT); g.addColorStop(0, '#140f28'); g.addColorStop(1, '#3c2e6b'); ctx.fillStyle = g; ctx.fillRect(0,0,WIDTH,HEIGHT);
-    drawPlayerSprite(WIDTH/2 - PLAYER_WIDTH*0.8, HEIGHT/2 - 150, PLAYER_WIDTH*1.6, PLAYER_HEIGHT*1.6, 1, 0, true, false, frameTick);
-    drawCenterText([
+  } else if(state === STATE_MENU){
+    let g = ctx.createLinearGradient(0,0,0,HEIGHT); g.addColorStop(0, '#140f28'); g.addColorStop(1, '#3c2e6b'); ctx.fillStyle = g; ctx.fillRect(0,0,WIDTH,HEIGHT);
+    drawPlayerSprite(WIDTH/2 - PLAYER_WIDTH*0.8, HEIGHT/2 - 150, PLAYER_WIDTH*1.6, PLAYER_HEIGHT*1.6, 1, 0, true, false, frameTick, getCharacter(currentCharacterId));
+    drawCenterText(isMobile ? [
+      ['ZKR - LE BOSS DE LA STREET', true],
+      ['Bouton SAUT : lancer le jeu', false],
+      ['Bouton TIR : attaque à distance', false],
+      ['Bouton ☰ : carte des niveaux', false],
+      [`Personnage : ${getCharacter(currentCharacterId).name}`, false]
+    ] : [
       ['ZKR - LE BOSS DE LA STREET', true],
       ['Appuie sur ESPACE pour lancer le jeu', false],
-      ['Appuie sur M pour choisir un niveau (carte du monde)', false]
-    ], 40);
+      ['E : tir à distance   |   M : carte du monde', false],
+      [`Appuie sur C pour choisir ton personnage (actuel : ${getCharacter(currentCharacterId).name})`, false]
+    ], 20);
   } else if(state === STATE_MAP){
     drawMapScreen();
+  } else if(state === STATE_CHARACTER){
+    drawCharacterScreen();
   } else if(state === STATE_VICTORY){
     // Écran de victoire dédié : on a fini le monde 4, worldIndex peut être hors des bornes de WORLD_THEMES,
     // donc on ne tente plus de dessiner un niveau de jeu ici (ça faisait planter le jeu).
@@ -1026,9 +1682,36 @@ function gameLoop(){
 
     ctx.save(); ctx.translate(-cameraX, 0);
     level.groundRects.forEach(r => { ctx.fillStyle = rgb(theme.ground); ctx.fillRect(r.x, r.y, r.w, r.h); ctx.fillStyle = rgb(theme.groundTop); ctx.fillRect(r.x, r.y, r.w, 10); drawGroundTexture(worldIndex, r, cameraX); });
-    level.platformRects.forEach(r => { ctx.fillStyle = rgb(theme.platform); ctx.fillRect(r.x, r.y, r.w, r.h); ctx.fillStyle = rgb(theme.platformTop); ctx.fillRect(r.x, r.y, r.w, 6); drawPlatformTexture(worldIndex, r); });
+    level.platformRects.forEach(r => {
+      ctx.fillStyle = rgb(theme.platform); ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.fillStyle = rgb(theme.platformTop); ctx.fillRect(r.x, r.y, r.w, 6);
+      drawPlatformTexture(worldIndex, r);
+      if(r instanceof MovingPlatform){
+        // Liseré accent + petites flèches pour signaler que la plateforme bouge et indiquer son axe
+        ctx.save();
+        ctx.strokeStyle = rgb(theme.accent); ctx.lineWidth = 2;
+        ctx.strokeRect(r.x+1, r.y+1, r.w-2, r.h-2);
+        ctx.fillStyle = rgb(theme.accent);
+        ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+        const arrow = r.axis === 'x' ? '\u2194' : '\u2195';
+        ctx.fillText(arrow, r.x + r.w/2, r.y + r.h/2 + 4);
+        ctx.textAlign = 'left';
+        ctx.restore();
+      }
+    });
     ctx.fillStyle = rgb(theme.spike); level.spikes.forEach(r => { for(let x=r.x; x<r.x+r.w; x+=20){ ctx.beginPath(); ctx.moveTo(x, r.y+r.h); ctx.lineTo(x+10, r.y); ctx.lineTo(x+20, r.y+r.h); ctx.fill(); } });
     level.coins.forEach(c => { if(!c.taken){ drawStar(c.x, c.y, 10, 4.5, '#ffd700'); drawStar(c.x, c.y, 6, 2.5, '#fff6b0'); } });
+    projectiles.forEach(p => {
+      ctx.save();
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color; ctx.shadowBlur = 8;
+      // petite traînée derrière le projectile pour renforcer la sensation de vitesse
+      ctx.globalAlpha = 0.35;
+      ctx.fillRect(p.x - p.dir*14, p.y+2, 12, p.h-4);
+      ctx.globalAlpha = 1;
+      roundRectPath(p.x, p.y, p.w, p.h, p.h/2); ctx.fill();
+      ctx.restore();
+    });
     enemies.forEach(e => {
       if(!e.alive) return;
       ctx.save();
@@ -1041,10 +1724,13 @@ function gameLoop(){
     ctx.fillStyle = '#3a3a3a'; ctx.fillRect(level.goalX-5, level.goalY-140, 8, 140);
     ctx.fillStyle = rgb(theme.accent);
     ctx.beginPath(); ctx.moveTo(level.goalX+3, level.goalY-140); ctx.lineTo(level.goalX+68, level.goalY-120); ctx.lineTo(level.goalX+3, level.goalY-100); ctx.fill();
+    if(level.bossBarrierX != null && enemies.some(e => e.isBoss && e.alive)){
+      drawBossBarrier(level.bossBarrierX, theme, frameTick);
+    }
     ctx.restore();
 
     if(player.invincibleTimer <= 0 || player.invincibleTimer % 8 < 5){
-      drawPlayerSprite(player.x - cameraX, player.y, player.w, player.h, player.facing, player.vx, player.onGround, player.h === PLAYER_CROUCH_HEIGHT, frameTick);
+      drawPlayerSprite(player.x - cameraX, player.y, player.w, player.h, player.facing, player.vx, player.onGround, player.h === PLAYER_CROUCH_HEIGHT, frameTick, getCharacter(currentCharacterId));
     }
     
     ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,WIDTH,50); ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial';
@@ -1053,12 +1739,21 @@ function gameLoop(){
 
     const boss = enemies.find(e => e.isBoss && e.alive);
     if(boss){
-      const barW = 320, barX = (WIDTH-barW)/2, barY = 60;
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(barX-14, barY-10, barW+28, 28);
-      ctx.font = '16px Arial'; ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.fillText('💀', barX-2, barY+9); ctx.textAlign='left';
-      ctx.fillStyle = '#4a1010'; ctx.fillRect(barX, barY, barW, 12);
-      ctx.fillStyle = '#e63333'; ctx.fillRect(barX, barY, barW * (boss.hp/boss.maxHp), 12);
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.strokeRect(barX, barY, barW, 12);
+      const barW = 340, barX = (WIDTH-barW)/2, barY = 66;
+      const bossName = BOSS_NAMES[Math.min(worldIndex, BOSS_NAMES.length-1)];
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.62)'; roundRectPath(barX-16, barY-30, barW+32, 54, 8); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+      ctx.fillText(`💀 ${bossName} 💀`, barX+barW/2, barY-12);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#3a0d0d'; roundRectPath(barX, barY, barW, 14, 4); ctx.fill();
+      const hpRatio = boss.hp/boss.maxHp;
+      const hpGrad = ctx.createLinearGradient(barX,0,barX+barW,0);
+      hpGrad.addColorStop(0, '#ff5a3c'); hpGrad.addColorStop(1, '#ffcf3c');
+      ctx.fillStyle = hpGrad; roundRectPath(barX, barY, Math.max(barW * hpRatio, hpRatio>0?6:0), 14, 4); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4; roundRectPath(barX, barY, barW, 14, 4); ctx.stroke();
+      ctx.restore();
     }
 
     if(state === STATE_LEVEL_CLEAR) drawCenterText([['NIVEAU REUSSI !', true]]);
