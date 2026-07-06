@@ -74,6 +74,92 @@
   }
   .tcSmall2.show { display: block; }
   .tcBtn:active { background: rgba(255,255,255,0.38); }
+
+  /* ===== Bouton et panneau Paramètres ===== */
+  #settingsBtn {
+    position: absolute; top: 10px; right: 10px; z-index: 40;
+    width: 42px; height: 42px; border-radius: 50%;
+    background: rgba(20,15,35,0.75); border: 2px solid rgba(255,255,255,0.4);
+    color: #fff; font-size: 20px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-user-select: none; user-select: none;
+  }
+  #settingsBtn:active { transform: scale(0.94); }
+  #settingsOverlay {
+    position: absolute; inset: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(8,6,16,0.92);
+  }
+  #settingsOverlay.hidden { display: none; }
+  #settingsBox {
+    color: #fff; background: #1b1530; border: 2px solid #4a3d80;
+    border-radius: 16px; padding: 22px 26px; width: min(86vw, 380px);
+    max-height: 82vh; overflow-y: auto; text-align: left;
+    box-shadow: 0 0 40px rgba(0,0,0,0.6);
+  }
+  #settingsBox h2 {
+    margin: 0 0 16px; font-size: 19px; text-align: center; letter-spacing: 0.5px;
+  }
+  .settingsRow {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 16px;
+  }
+  .settingsRow label { font-size: 14px; }
+  .switch { position: relative; display: inline-block; width: 46px; height: 26px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switchSlider {
+    position: absolute; cursor: pointer; inset: 0;
+    background: #55507a; border-radius: 26px; transition: 0.2s;
+  }
+  .switchSlider::before {
+    content: ""; position: absolute; height: 20px; width: 20px; left: 3px; bottom: 3px;
+    background: #fff; border-radius: 50%; transition: 0.2s;
+  }
+  .switch input:checked + .switchSlider { background: #3fae55; }
+  .switch input:checked + .switchSlider::before { transform: translateX(20px); }
+  #musicVolumeSlider { width: 100%; accent-color: #3fae55; }
+  .settingsSection { margin-top: 6px; margin-bottom: 18px; }
+  .settingsSection h3 {
+    font-size: 14px; margin: 0 0 8px; color: #b9aef0; letter-spacing: 0.3px;
+    border-bottom: 1px solid #4a3d80; padding-bottom: 6px;
+  }
+  .settingsSection ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; color: #ddd; }
+  #changeDeviceBtn {
+    width: 100%; margin-top: 4px; padding: 10px; border-radius: 10px;
+    background: linear-gradient(#2f6fe0, #1c4aa8); border: 2px solid #5b93f0;
+    color: #fff; font-weight: bold; font-family: Arial, Helvetica, sans-serif;
+    font-size: 13px; cursor: pointer;
+  }
+  #changeDeviceBtn:active { transform: scale(0.97); }
+  #closeSettingsBtn {
+    display: block; margin: 18px auto 0; padding: 8px 22px; border-radius: 10px;
+    background: rgba(255,255,255,0.14); border: 2px solid rgba(255,255,255,0.4);
+    color: #fff; font-weight: bold; font-family: Arial, Helvetica, sans-serif;
+    font-size: 13px; cursor: pointer;
+  }
+  #closeSettingsBtn:active { transform: scale(0.96); }
+
+  .keybindRow {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin-bottom: 8px; font-size: 13px;
+  }
+  .keybindBtn {
+    min-width: 92px; padding: 7px 10px; border-radius: 8px;
+    background: rgba(255,255,255,0.14); border: 2px solid rgba(255,255,255,0.4);
+    color: #fff; font-weight: bold; font-family: Arial, Helvetica, sans-serif;
+    font-size: 12px; cursor: pointer; text-align: center;
+  }
+  .keybindBtn.listening {
+    background: rgba(255,180,60,0.35); border-color: #ffb43c; color: #ffe0a0;
+  }
+  .keybindBtn:active { transform: scale(0.96); }
+  .keybindHint { font-size: 11px; color: #a89ed6; margin: 8px 0 10px; line-height: 1.5; }
+  #resetKeybindsBtn {
+    width: 100%; padding: 7px; border-radius: 8px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.3);
+    color: #ccc; font-size: 12px; cursor: pointer; font-family: Arial, Helvetica, sans-serif;
+  }
+  #resetKeybindsBtn:active { transform: scale(0.97); }
 </style>
 </head>
 <body>
@@ -103,6 +189,68 @@
     </div>
     <button class="tcBtn tcSmall" id="tcMenu">☰</button>
     <button class="tcBtn tcSmall2" id="tcPerso">🧑</button>
+  </div>
+
+  <button id="settingsBtn" title="Paramètres">⚙</button>
+
+  <div id="settingsOverlay" class="hidden">
+    <div id="settingsBox">
+      <h2>PARAMÈTRES</h2>
+
+      <div class="settingsRow">
+        <label for="musicToggle">Musique de fond</label>
+        <label class="switch">
+          <input type="checkbox" id="musicToggle" checked>
+          <span class="switchSlider"></span>
+        </label>
+      </div>
+
+      <div class="settingsRow" style="display:block;">
+        <label for="musicVolumeSlider">Volume de la musique</label>
+        <input type="range" id="musicVolumeSlider" min="0" max="100" value="45">
+      </div>
+
+      <div class="settingsSection" id="keybindSection">
+        <h3>Commandes clavier (PC) — clique pour reconfigurer</h3>
+        <div class="keybindRow" data-action="left">
+          <span>Gauche</span>
+          <button class="keybindBtn" data-action="left"></button>
+        </div>
+        <div class="keybindRow" data-action="right">
+          <span>Droite</span>
+          <button class="keybindBtn" data-action="right"></button>
+        </div>
+        <div class="keybindRow" data-action="down">
+          <span>Bas / glisser</span>
+          <button class="keybindBtn" data-action="down"></button>
+        </div>
+        <div class="keybindRow" data-action="jump">
+          <span>Saut</span>
+          <button class="keybindBtn" data-action="jump"></button>
+        </div>
+        <div class="keybindRow" data-action="shoot">
+          <span>Tir à distance</span>
+          <button class="keybindBtn" data-action="shoot"></button>
+        </div>
+        <div class="keybindHint">Clique sur un bouton puis appuie sur une touche <b>ou clique</b> (gauche / molette / droit) pour l'assigner. Les flèches et Espace restent toujours utilisables en plus. &nbsp;·&nbsp; Échap : carte/pause &nbsp;·&nbsp; C : personnage</div>
+        <button id="resetKeybindsBtn">Réinitialiser les touches</button>
+      </div>
+
+      <div class="settingsSection">
+        <h3>Commandes tactiles (Mobile)</h3>
+        <ul>
+          <li>◀ ▶ ▼ : se déplacer / s'accroupir</li>
+          <li>SAUT : sauter</li>
+          <li>TIR : tir à distance</li>
+          <li>☰ : carte du monde / pause</li>
+          <li>🧑 : choisir son personnage</li>
+        </ul>
+      </div>
+
+      <button id="changeDeviceBtn">Changer d'appareil (PC / Mobile)</button>
+
+      <button id="closeSettingsBtn">FERMER</button>
+    </div>
   </div>
 </div>
 
@@ -138,12 +286,25 @@ Object.values(MUSIC).forEach(a => { a.loop = true; a.volume = 0.45; a.preload = 
 
 const WORLD_MUSIC_KEYS = ['ville', 'desert', 'foret', 'banquise']; // même ordre que WORLD_THEMES
 
+// ---- Réglages audio (modifiables depuis le panneau Paramètres) ----
+let musicEnabled = true;
+let musicVolume = 0.45; // 0 à 1
+
+function applyMusicSettings(){
+  Object.values(MUSIC).forEach(a => { a.volume = musicVolume; });
+  if(!musicEnabled && currentMusicKey && MUSIC[currentMusicKey]){
+    MUSIC[currentMusicKey].pause();
+  } else if(musicEnabled && currentMusicKey && MUSIC[currentMusicKey] && MUSIC[currentMusicKey].paused){
+    MUSIC[currentMusicKey].play().catch(() => {});
+  }
+}
+
 let currentMusicKey = null;
 function playMusic(key){
   if(currentMusicKey === key) return;
   if(currentMusicKey && MUSIC[currentMusicKey]){ MUSIC[currentMusicKey].pause(); MUSIC[currentMusicKey].currentTime = 0; }
   currentMusicKey = key;
-  if(key && MUSIC[key]){
+  if(key && MUSIC[key] && musicEnabled){
     MUSIC[key].currentTime = 0;
     MUSIC[key].play().catch(() => {}); // autoplay bloqué tant qu'il n'y a pas eu d'interaction : sans risque, on retentera à chaque frame
   }
@@ -556,10 +717,10 @@ class Player {
   get rect(){ return {x:this.x, y:this.y, w:this.w, h:this.h}; }
   reset(x, y){ this.x=x; this.y=y; this.vx=0; this.vy=0; this.h=PLAYER_HEIGHT; this.onGround=false; this.invincibleTimer=60; this.slideTimer=0; this.shootCooldown=0; }
   update(keys, solids){
-    const left = !!keys['ArrowLeft'] || !!keys['q'] || !!keys['Q'];
-    const right = !!keys['ArrowRight'] || !!keys['d'] || !!keys['D'];
-    const down = !!keys['ArrowDown'] || !!keys['s'] || !!keys['S'];
-    const jump = !!keys[' '];
+    const left = isKeyDown('ArrowLeft') || isActionBindDown(KEYBINDS.left);
+    const right = isKeyDown('ArrowRight') || isActionBindDown(KEYBINDS.right);
+    const down = isKeyDown('ArrowDown') || isActionBindDown(KEYBINDS.down);
+    const jump = isKeyDown(' ') || isActionBindDown(KEYBINDS.jump);
 
     if(left) this.facing = -1; else if(right) this.facing = 1;
 
@@ -1112,6 +1273,39 @@ const LEVELS_PER_WORLD = LEVEL_NAMES.length; // 5 (4 niveaux + 1 boss)
 function FLAT(w, l){ return w * LEVELS_PER_WORLD + l; }
 
 let state = STATE_DEVICE, worldIndex = 0, levelIndex = 0, lives = 3, score = 0, cameraX = 0, levelTransitionTimer = 0, frameTick = 0;
+
+// ---- Touches personnalisables (mode PC), modifiables depuis le panneau Paramètres ----
+// Les flèches / Espace restent toujours actives en plus (voir isKeyDown), ces touches ne sont que des alternatives.
+const DEFAULT_KEYBINDS = { left: 'q', right: 'd', down: 's', jump: ' ', shoot: 'e' };
+let KEYBINDS = { ...DEFAULT_KEYBINDS };
+const ACTION_LABELS = { left: 'Gauche', right: 'Droite', down: 'Bas / glisser', jump: 'Saut', shoot: 'Tir à distance' };
+
+function keyDisplayName(k){
+  if(k === ' ') return 'ESPACE';
+  if(k === 'ArrowLeft') return '←';
+  if(k === 'ArrowRight') return '→';
+  if(k === 'ArrowUp') return '↑';
+  if(k === 'ArrowDown') return '↓';
+  if(k === 'Escape') return 'ÉCHAP';
+  if(k === 'Mouse0') return 'CLIC GAUCHE';
+  if(k === 'Mouse1') return 'CLIC MOLETTE';
+  if(k === 'Mouse2') return 'CLIC DROIT';
+  if(!k) return '?';
+  return k.length === 1 ? k.toUpperCase() : k;
+}
+// Vérifie si une touche est actuellement enfoncée, sans se soucier de la casse (Maj) pour les lettres.
+function isKeyDown(k){
+  if(!k) return false;
+  if(k.length === 1) return !!keys[k.toLowerCase()] || !!keys[k.toUpperCase()];
+  return !!keys[k];
+}
+let mouseButtons = {}; // état des boutons de la souris (0 = gauche, 1 = molette, 2 = droit)
+// Vérifie l'état d'une touche assignée, qu'il s'agisse d'une touche clavier ou d'un clic de souris (ex: "Mouse2" pour clic droit).
+function isActionBindDown(bind){
+  if(!bind) return false;
+  if(bind.startsWith('Mouse')) return !!mouseButtons[Number(bind.slice(5))];
+  return isKeyDown(bind);
+}
 let level = null, player = new Player(), enemies = [], keys = {};
 let projectiles = [];
 let stateBeforeDevice = STATE_MENU; // état vers lequel revenir une fois l'appareil choisi
@@ -1150,6 +1344,7 @@ function saveGame(){
       worldIndex, levelIndex, lives, score,
       unlockedFlat, checkpointWorld, checkpointScore,
       currentCharacterId, isMobile,
+      musicEnabled, musicVolume, KEYBINDS,
       totalCoinsAllTime, bossesDefeated, worldsCompletedCount, victoriesCount,
       // On ne sauvegarde "playing" que si une partie est réellement en cours, pour reprendre pile dans le niveau au reload
       resumeState: (state === STATE_PLAYING) ? 'playing' : 'menu'
@@ -1176,6 +1371,9 @@ function applySavedData(d){
   checkpointWorld = d.checkpointWorld ?? 0;
   checkpointScore = d.checkpointScore ?? 0;
   currentCharacterId = d.currentCharacterId ?? 'zkr';
+  musicEnabled = d.musicEnabled ?? true;
+  musicVolume = d.musicVolume ?? 0.45;
+  if(d.KEYBINDS) KEYBINDS = { ...DEFAULT_KEYBINDS, ...d.KEYBINDS };
   totalCoinsAllTime = d.totalCoinsAllTime ?? 0;
   bossesDefeated = d.bossesDefeated ?? 0;
   worldsCompletedCount = d.worldsCompletedCount ?? 0;
@@ -1313,13 +1511,47 @@ function onKeyPress(key){
 
 const HANDLED_KEYS = [' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Escape'];
 window.addEventListener('keydown', e => {
-  if(HANDLED_KEYS.includes(e.key)) e.preventDefault(); // évite que la page défile pendant qu'on joue
+  // Tant que le panneau Paramètres est ouvert, on laisse les touches (Échap notamment) au panneau,
+  // sans les transmettre au jeu, pour éviter qu'une action de jeu se déclenche en arrière-plan.
+  if(settingsOverlay && !settingsOverlay.classList.contains('hidden')){
+    if(rebindingAction){
+      e.preventDefault();
+      if(e.key !== 'Escape'){ // Échap annule la réattribution en cours plutôt que de devenir la nouvelle touche
+        KEYBINDS[rebindingAction] = e.key;
+        saveGame();
+      }
+      syncSettingsUI();
+      return;
+    }
+    if(e.key === 'Escape') closeSettings();
+    return;
+  }
+  if(HANDLED_KEYS.includes(e.key) || Object.values(KEYBINDS).includes(e.key)) e.preventDefault(); // évite que la page défile pendant qu'on joue
   const isNewPress = !keys[e.key];
   keys[e.key] = true;
   if(isNewPress) onKeyPress(e.key); // une seule action par pression, pas de répétition en boucle
 });
 window.addEventListener('keyup', e => { keys[e.key] = false; });
-window.addEventListener('blur', () => { keys = {}; }); // évite les touches "bloquées" si la fenêtre perd le focus
+window.addEventListener('blur', () => { keys = {}; mouseButtons = {}; }); // évite les touches "bloquées" si la fenêtre perd le focus
+
+// ---- Souris : permet d'assigner une action (ex: le tir) à un clic (gauche/molette/droit) ----
+// Le clic droit ouvre normalement un menu contextuel : on le désactive pour pouvoir s'en servir comme touche de jeu.
+window.addEventListener('contextmenu', e => e.preventDefault());
+window.addEventListener('mousedown', e => {
+  mouseButtons[e.button] = true;
+  const settingsAreOpenNow = settingsOverlay && !settingsOverlay.classList.contains('hidden');
+  if(settingsAreOpenNow && rebindingAction){
+    const onButton = e.target.closest && e.target.closest('.keybindBtn');
+    // Un clic gauche sur le bouton lui-même sert à ouvrir/changer l'écoute, donc on ne le capture pas comme touche.
+    // En revanche, un clic droit ou molette sur ce même bouton est un choix volontaire : on le capture normalement.
+    if(e.button === 0 && onButton) return;
+    e.preventDefault();
+    KEYBINDS[rebindingAction] = 'Mouse' + e.button;
+    saveGame();
+    syncSettingsUI();
+  }
+});
+window.addEventListener('mouseup', e => { mouseButtons[e.button] = false; });
 
 // On force le clic sur le canvas à donner le focus
 canvas.addEventListener('click', () => { canvas.focus(); });
@@ -1347,6 +1579,79 @@ function chooseDevice(mobile){
 }
 document.getElementById('btnMobile').addEventListener('click', () => chooseDevice(true));
 document.getElementById('btnPC').addEventListener('click', () => chooseDevice(false));
+
+// ---- Panneau Paramètres (musique + rappel des commandes) ----
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsOverlay = document.getElementById('settingsOverlay');
+const musicToggle = document.getElementById('musicToggle');
+const musicVolumeSlider = document.getElementById('musicVolumeSlider');
+const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+const changeDeviceBtn = document.getElementById('changeDeviceBtn');
+const keybindSection = document.getElementById('keybindSection');
+const keybindButtons = Array.from(document.querySelectorAll('.keybindBtn'));
+const resetKeybindsBtn = document.getElementById('resetKeybindsBtn');
+let rebindingAction = null; // action en cours de réattribution ('left', 'jump', ...), ou null
+
+function syncSettingsUI(){
+  musicToggle.checked = musicEnabled;
+  musicVolumeSlider.value = Math.round(musicVolume * 100);
+  keybindButtons.forEach(btn => {
+    const action = btn.dataset.action;
+    btn.textContent = keyDisplayName(KEYBINDS[action]);
+    btn.classList.remove('listening');
+  });
+  rebindingAction = null;
+  // La reconfiguration des touches n'a de sens qu'au clavier : masquée en mode tactile.
+  keybindSection.style.display = isMobile ? 'none' : '';
+}
+
+function openSettings(){
+  syncSettingsUI();
+  settingsOverlay.classList.remove('hidden');
+}
+function closeSettings(){
+  settingsOverlay.classList.add('hidden');
+  rebindingAction = null;
+  canvas.focus();
+}
+
+settingsBtn.addEventListener('click', openSettings);
+closeSettingsBtn.addEventListener('click', closeSettings);
+
+musicToggle.addEventListener('change', () => {
+  musicEnabled = musicToggle.checked;
+  applyMusicSettings();
+  saveGame();
+});
+
+musicVolumeSlider.addEventListener('input', () => {
+  musicVolume = Number(musicVolumeSlider.value) / 100;
+  applyMusicSettings();
+});
+musicVolumeSlider.addEventListener('change', () => saveGame());
+
+// Permet de changer d'appareil (PC/Mobile) directement depuis les Paramètres, sans devoir recharger la page.
+changeDeviceBtn.addEventListener('click', () => {
+  closeSettings();
+  deviceOverlay.classList.remove('hidden');
+});
+
+// ---- Réattribution des touches (mode PC) ----
+keybindButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    keybindButtons.forEach(b => b.classList.remove('listening'));
+    rebindingAction = btn.dataset.action;
+    btn.classList.add('listening');
+    btn.textContent = '...';
+  });
+});
+
+resetKeybindsBtn.addEventListener('click', () => {
+  KEYBINDS = { ...DEFAULT_KEYBINDS };
+  rebindingAction = null;
+  syncSettingsUI();
+  saveGame();
+});
 
 // ---- Boutons tactiles : ils pilotent le même objet `keys` que le clavier ----
 function bindTouchButton(id, key){
@@ -1738,15 +2043,16 @@ function damagePlayer(){
 
 function gameLoop(){
   frameTick++;
+  const settingsAreOpen = settingsOverlay && !settingsOverlay.classList.contains('hidden');
   if(state === STATE_PLAYING && frameTick % 120 === 0) saveGame(); // autosave ~ toutes les 2 secondes
-  if(state === STATE_PLAYING){
+  if(state === STATE_PLAYING && !settingsAreOpen){
     level.movingPlatforms.forEach(mp => mp.update(frameTick));
     player.update(keys, level.solids);
     cameraX += ((player.x - WIDTH/3) - cameraX) * 0.1;
     cameraX = Math.max(0, Math.min(cameraX, level.width - WIDTH));
 
     // Attaque à distance : maintenir E (ou le bouton TIR tactile) tire en continu, limité par le cooldown
-    if(keys['e'] || keys['E']) tryShoot();
+    if(isKeyDown('e') || isActionBindDown(KEYBINDS.shoot)) tryShoot();
 
     if(player.y > DEATH_Y) damagePlayer();
     level.coins.forEach(c => { if(!c.taken && Math.hypot(player.x+player.w/2 - c.x, player.y+player.h/2 - c.y) < 35){ c.taken = true; score++; totalCoinsAllTime++; } });
@@ -1936,6 +2242,8 @@ function gameLoop(){
 // ---- Chargement de la sauvegarde au démarrage ----
 savedData = loadGame();
 applySavedData(savedData);
+applyMusicSettings();
+syncSettingsUI();
 
 // Sauvegarde automatique régulière pendant qu'on joue (au cas où la page serait rechargée/fermée en plein niveau)
 // et systématiquement juste avant de quitter/recharger la page.
