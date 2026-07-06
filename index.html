@@ -1127,12 +1127,60 @@ let bossesDefeated = 0;
 let worldsCompletedCount = 0;
 let victoriesCount = 0;
 
+// ---- Stats du niveau en cours (servent à calculer les étoiles de l'écran de fin de niveau) ----
+let livesLostThisLevel = 0;
+let levelClearStars = 3, levelClearCoins = 0, levelClearCoinsTotal = 0;
+
 // ---- Progression / checkpoints (façon carte du monde Mario) ----
 let unlockedFlat = 0;           // plus grand niveau déjà débloqué (index à plat monde*5+niveau)
 let checkpointWorld = 0;        // monde où l'on respawn après un Game Over (toujours le début de ce monde)
 let checkpointScore = 0;        // score restauré à ce checkpoint
 let mapCursorWorld = 0, mapCursorLevel = 0;
 let mapReturnsToPlay = false;   // true si la carte a été ouverte en pause depuis une partie en cours
+let stateBeforeCharacter = STATE_MENU; // état vers lequel revenir en quittant l'écran de personnage (menu OU en plein niveau)
+
+// ===================== SAUVEGARDE (localStorage) =====================
+// Sauvegarde la progression pour ne pas tout perdre au rechargement de la page.
+const SAVE_KEY = 'zkr_save_v1';
+let savedData = null;
+
+function saveGame(){
+  try{
+    const data = {
+      worldIndex, levelIndex, lives, score,
+      unlockedFlat, checkpointWorld, checkpointScore,
+      currentCharacterId, isMobile,
+      totalCoinsAllTime, bossesDefeated, worldsCompletedCount, victoriesCount,
+      // On ne sauvegarde "playing" que si une partie est réellement en cours, pour reprendre pile dans le niveau au reload
+      resumeState: (state === STATE_PLAYING) ? 'playing' : 'menu'
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch(e) { /* localStorage indisponible : on continue sans sauvegarder */ }
+}
+
+function loadGame(){
+  try{
+    const raw = localStorage.getItem(SAVE_KEY);
+    if(!raw) return null;
+    return JSON.parse(raw);
+  } catch(e) { return null; }
+}
+
+function applySavedData(d){
+  if(!d) return;
+  worldIndex = d.worldIndex ?? 0;
+  levelIndex = d.levelIndex ?? 0;
+  lives = d.lives ?? 3;
+  score = d.score ?? 0;
+  unlockedFlat = d.unlockedFlat ?? 0;
+  checkpointWorld = d.checkpointWorld ?? 0;
+  checkpointScore = d.checkpointScore ?? 0;
+  currentCharacterId = d.currentCharacterId ?? 'zkr';
+  totalCoinsAllTime = d.totalCoinsAllTime ?? 0;
+  bossesDefeated = d.bossesDefeated ?? 0;
+  worldsCompletedCount = d.worldsCompletedCount ?? 0;
+  victoriesCount = d.victoriesCount ?? 0;
+}
 
 function initLevel(){
   level = generateLevel(worldIndex, levelIndex);
@@ -1142,18 +1190,49 @@ function initLevel(){
   }));
   projectiles = [];
   cameraX = 0;
+  livesLostThisLevel = 0;
+}
+
+// Fait progresser le jeu après un écran de fin de niveau (appelé quand le joueur choisit "Continuer")
+function advanceAfterLevelClear(){
+  levelIndex++;
+  if(levelIndex >= LEVELS_PER_WORLD){
+    levelIndex = 0; worldIndex++; worldsCompletedCount++;
+    if(worldIndex >= WORLD_THEMES.length){
+      unlockedFlat = FLAT(WORLD_THEMES.length - 1, LEVELS_PER_WORLD - 1);
+      state = STATE_VICTORY; victoriesCount++;
+    } else {
+      checkpointWorld = worldIndex; checkpointScore = score; // nouveau monde = nouveau checkpoint
+      unlockedFlat = Math.max(unlockedFlat, FLAT(worldIndex, levelIndex));
+      initLevel(); state = STATE_PLAYING;
+    }
+  } else {
+    unlockedFlat = Math.max(unlockedFlat, FLAT(worldIndex, levelIndex));
+    initLevel(); state = STATE_PLAYING;
+  }
+  saveGame();
+}
+
+// Relance le niveau qu'on vient de terminer (bouton "Rejouer" de l'écran de fin de niveau)
+function retryCurrentLevel(){
+  lives = 3;
+  initLevel();
+  state = STATE_PLAYING;
+  saveGame();
 }
 
 function startNewGame(){
   worldIndex = 0; levelIndex = 0; lives = 3; score = 0;
   unlockedFlat = 0; checkpointWorld = 0; checkpointScore = 0;
   state = STATE_PLAYING; initLevel();
+  saveGame();
 }
 
 function respawnAtCheckpoint(){
   // Un Game Over ne renvoie jamais avant le début du monde en cours (ex: mort dans le désert -> on reste dans le désert)
   worldIndex = checkpointWorld; levelIndex = 0; lives = 3; score = checkpointScore;
   state = STATE_PLAYING; initLevel();
+  saveGame();
 }
 
 function openMap(fromPause){
@@ -1168,16 +1247,19 @@ function tryLaunchFromMap(){
   worldIndex = mapCursorWorld; levelIndex = mapCursorLevel; lives = 3;
   checkpointWorld = mapCursorWorld; checkpointScore = score;
   state = STATE_PLAYING; initLevel();
+  saveGame();
 }
 
-function openCharacterSelect(){
+// fromPlay = true quand l'écran perso est ouvert en pause depuis une partie en cours (accessible en plein niveau)
+function openCharacterSelect(fromPlay){
+  stateBeforeCharacter = fromPlay ? STATE_PLAYING : STATE_MENU;
   charCursor = Math.max(0, CHARACTERS.findIndex(c => c.id === currentCharacterId));
   state = STATE_CHARACTER;
 }
 
 function trySelectCharacter(){
   const c = CHARACTERS[charCursor];
-  if(c && c.isUnlocked()) currentCharacterId = c.id;
+  if(c && c.isUnlocked()){ currentCharacterId = c.id; saveGame(); }
 }
 
 // Attaque à distance : tire un projectile dans la direction où regarde le joueur.
@@ -1200,7 +1282,7 @@ function onKeyPress(key){
   } else if(state === STATE_MENU){
     if(key === ' ') startNewGame();
     else if(key === 'm' || key === 'M') openMap(false);
-    else if(key === 'c' || key === 'C') openCharacterSelect();
+    else if(key === 'c' || key === 'C') openCharacterSelect(false);
   } else if(state === STATE_GAME_OVER){
     if(key === ' ') respawnAtCheckpoint();
     else if(key === 'm' || key === 'M') openMap(false);
@@ -1209,6 +1291,11 @@ function onKeyPress(key){
     else if(key === 'm' || key === 'M') openMap(false);
   } else if(state === STATE_PLAYING){
     if(key === 'Escape') openMap(true);
+    else if(key === 'c' || key === 'C') openCharacterSelect(true);
+  } else if(state === STATE_LEVEL_CLEAR){
+    if(key === ' ' || key === 'Enter') advanceAfterLevelClear();
+    else if(key === 'r' || key === 'R' || key === 'e' || key === 'E') retryCurrentLevel();
+    else if(key === 'm' || key === 'M' || key === 'Escape') openMap(false);
   } else if(state === STATE_MAP){
     if(key === 'ArrowLeft') mapCursorLevel = Math.max(0, mapCursorLevel - 1);
     else if(key === 'ArrowRight') mapCursorLevel = Math.min(LEVELS_PER_WORLD - 1, mapCursorLevel + 1);
@@ -1220,7 +1307,7 @@ function onKeyPress(key){
     if(key === 'ArrowLeft') charCursor = Math.max(0, charCursor - 1);
     else if(key === 'ArrowRight') charCursor = Math.min(CHARACTERS.length - 1, charCursor + 1);
     else if(key === ' ' || key === 'Enter') trySelectCharacter();
-    else if(key === 'Escape') state = STATE_MENU;
+    else if(key === 'Escape') state = stateBeforeCharacter;
   }
 }
 
@@ -1253,7 +1340,9 @@ function chooseDevice(mobile){
   } else {
     touchControls.classList.remove('active');
   }
-  state = STATE_MENU;
+  // Si une sauvegarde existe et qu'une partie était en cours, on reprend directement dans le niveau (le monde/niveau/vies/score sont déjà restaurés plus bas)
+  state = (savedData && savedData.resumeState === 'playing') ? STATE_PLAYING : STATE_MENU;
+  saveGame();
   canvas.focus();
 }
 document.getElementById('btnMobile').addEventListener('click', () => chooseDevice(true));
@@ -1284,10 +1373,12 @@ document.getElementById('tcMenu').addEventListener('pointerdown', (ev) => {
   if(state === STATE_PLAYING) onKeyPress('Escape');
   else if(state === STATE_MAP || state === STATE_CHARACTER) onKeyPress('Escape');
   else if(state === STATE_MENU) openMap(false);
+  else if(state === STATE_LEVEL_CLEAR) onKeyPress('m');
 });
 document.getElementById('tcPerso').addEventListener('pointerdown', (ev) => {
   ev.preventDefault();
-  if(state === STATE_MENU) openCharacterSelect();
+  if(state === STATE_MENU) openCharacterSelect(false);
+  else if(state === STATE_PLAYING) openCharacterSelect(true);
 });
 
 function drawCenterText(lines, offset=0){
@@ -1298,6 +1389,83 @@ function drawCenterText(lines, offset=0){
     ctx.fillStyle = l[1] ? '#fff' : '#bbb';
     ctx.fillText(l[0], WIDTH/2, startY + i*34 + 17);
   });
+}
+
+// Petit bouton "pilule" réutilisable pour les écrans de fin de niveau (façon UI kit : fond dégradé, contour, libellé + touche)
+function drawPanelButton(x, y, w, h, label, hint, theme, primary){
+  ctx.save();
+  const g = ctx.createLinearGradient(0, y, 0, y+h);
+  if(primary){ g.addColorStop(0, rgb(theme.accent.map(c => Math.min(255, c+35)))); g.addColorStop(1, rgb(theme.accent)); }
+  else { g.addColorStop(0, 'rgba(255,255,255,0.14)'); g.addColorStop(1, 'rgba(255,255,255,0.04)'); }
+  ctx.fillStyle = g;
+  roundRectPath(x, y, w, h, h/2); ctx.fill();
+  ctx.strokeStyle = primary ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = primary ? 2.5 : 1.6;
+  roundRectPath(x, y, w, h, h/2); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 15px Arial';
+  ctx.fillText(label, x+w/2, y+h/2-7);
+  ctx.font = '11px Arial'; ctx.fillStyle = 'rgba(255,255,255,0.78)';
+  ctx.fillText(`(${hint})`, x+w/2, y+h/2+11);
+  ctx.restore();
+}
+
+// Écran de fin de niveau : petite fiche de score façon UI kit (étoiles, score, pièces, boutons), dans la palette du monde en cours
+function drawLevelClearPanel(){
+  const theme = WORLD_THEMES[Math.min(worldIndex, WORLD_THEMES.length - 1)];
+  ctx.save();
+
+  // Fond assombri par-dessus le niveau figé
+  ctx.fillStyle = 'rgba(6,4,14,0.6)';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  const panelW = 460, panelH = 350;
+  const px = (WIDTH - panelW)/2, py = (HEIGHT - panelH)/2 + 10;
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 26; ctx.shadowOffsetY = 12;
+  const bg = ctx.createLinearGradient(0, py, 0, py+panelH);
+  bg.addColorStop(0, '#241b40'); bg.addColorStop(1, '#150f28');
+  ctx.fillStyle = bg;
+  roundRectPath(px, py, panelW, panelH, 24); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = rgb(theme.accent); ctx.lineWidth = 3;
+  roundRectPath(px, py, panelW, panelH, 24); ctx.stroke();
+
+  // Bannière-titre
+  const bannerW = 300, bannerH = 46, bannerX = px + panelW/2 - bannerW/2, bannerY = py - 22;
+  ctx.fillStyle = rgb(theme.accent);
+  roundRectPath(bannerX, bannerY, bannerW, bannerH, 14); ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
+  roundRectPath(bannerX, bannerY, bannerW, bannerH, 14); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 20px Arial';
+  ctx.fillText('NIVEAU RÉUSSI !', bannerX+bannerW/2, bannerY+bannerH/2+1);
+
+  // Étoiles
+  const starY = py + 78, starSpacing = 72;
+  for(let i=0;i<3;i++){
+    const sx = px + panelW/2 + (i-1)*starSpacing;
+    const filled = i < levelClearStars;
+    drawStar(sx, starY, 27, 11.5, filled ? '#ffd700' : 'rgba(255,255,255,0.12)');
+    if(filled) drawStar(sx, starY, 15, 6, '#fff6b0');
+  }
+
+  // Score + pièces + vies restantes
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 24px Arial';
+  ctx.fillText(`SCORE : ${score}`, px+panelW/2, py+142);
+  ctx.font = '16px Arial'; ctx.fillStyle = '#e6e6e6';
+  ctx.fillText(`🪙 ${levelClearCoins} / ${levelClearCoinsTotal}      ${"❤️".repeat(Math.max(0, lives))}`, px+panelW/2, py+172);
+
+  // Boutons (libellés adaptés au mode tactile ou clavier)
+  const hintContinue = isMobile ? 'SAUT' : 'ESPACE';
+  const hintRetry = isMobile ? 'TIR' : 'R';
+  const hintMap = isMobile ? '☰' : 'M';
+  drawPanelButton(px+panelW/2-95, py+204, 190, 48, 'CONTINUER', hintContinue, theme, true);
+  drawPanelButton(px+panelW/2-172, py+264, 162, 42, 'REJOUER', hintRetry, theme, false);
+  drawPanelButton(px+panelW/2+10, py+264, 162, 42, 'CARTE', hintMap, theme, false);
+
+  ctx.restore();
 }
 
 function drawMapScreen(){
@@ -1562,13 +1730,15 @@ function drawPlatformTexture(worldIdx, r){
 function damagePlayer(){
   // Ne jamais infliger de dégâts si l'état de jeu a déjà changé (évite les vies négatives / crash sur plusieurs hits au même frame)
   if(state !== STATE_PLAYING) return;
+  livesLostThisLevel++;
   lives--;
-  if(lives <= 0){ lives = 0; state = STATE_GAME_OVER; }
+  if(lives <= 0){ lives = 0; state = STATE_GAME_OVER; saveGame(); }
   else { player.reset(level.startX, level.startY); }
 }
 
 function gameLoop(){
   frameTick++;
+  if(state === STATE_PLAYING && frameTick % 120 === 0) saveGame(); // autosave ~ toutes les 2 secondes
   if(state === STATE_PLAYING){
     level.movingPlatforms.forEach(mp => mp.update(frameTick));
     player.update(keys, level.solids);
@@ -1619,30 +1789,20 @@ function gameLoop(){
       player.x = level.bossBarrierX - player.w;
       if(player.vx > 0) player.vx = 0;
     }
-    if(state === STATE_PLAYING && !bossAlive && player.x + player.w > level.goalX && Math.abs((player.y + player.h) - level.goalY) < 120){ state = STATE_LEVEL_CLEAR; levelTransitionTimer = 60; }
-  } else if(state === STATE_LEVEL_CLEAR){
-    levelTransitionTimer--;
-    if(levelTransitionTimer <= 0){
-      levelIndex++;
-      if(levelIndex >= LEVELS_PER_WORLD){
-        levelIndex = 0; worldIndex++; worldsCompletedCount++;
-        if(worldIndex >= WORLD_THEMES.length){
-          unlockedFlat = FLAT(WORLD_THEMES.length - 1, LEVELS_PER_WORLD - 1);
-          state = STATE_VICTORY; victoriesCount++;
-        } else {
-          checkpointWorld = worldIndex; checkpointScore = score; // nouveau monde = nouveau checkpoint
-          unlockedFlat = Math.max(unlockedFlat, FLAT(worldIndex, levelIndex));
-          initLevel(); state = STATE_PLAYING;
-        }
-      } else {
-        unlockedFlat = Math.max(unlockedFlat, FLAT(worldIndex, levelIndex));
-        initLevel(); state = STATE_PLAYING;
-      }
+    if(state === STATE_PLAYING && !bossAlive && player.x + player.w > level.goalX && Math.abs((player.y + player.h) - level.goalY) < 120){
+      // Calcul des étoiles : 1 pour avoir fini le niveau, +1 si aucune vie perdue, +1 si toutes les pièces ramassées
+      const coinsTotal = level.coins.length;
+      const coinsCollected = level.coins.filter(c => c.taken).length;
+      let stars = 1;
+      if(livesLostThisLevel === 0) stars++;
+      if(coinsTotal === 0 || coinsCollected === coinsTotal) stars++;
+      levelClearStars = stars; levelClearCoins = coinsCollected; levelClearCoinsTotal = coinsTotal;
+      state = STATE_LEVEL_CLEAR;
     }
   }
 
   const tcPersoEl = document.getElementById('tcPerso');
-  if(tcPersoEl) tcPersoEl.classList.toggle('show', isMobile && state === STATE_MENU);
+  if(tcPersoEl) tcPersoEl.classList.toggle('show', isMobile && (state === STATE_MENU || state === STATE_PLAYING));
 
   updateMusic();
 
@@ -1756,7 +1916,7 @@ function gameLoop(){
       ctx.restore();
     }
 
-    if(state === STATE_LEVEL_CLEAR) drawCenterText([['NIVEAU REUSSI !', true]]);
+    if(state === STATE_LEVEL_CLEAR) drawLevelClearPanel();
   }
   
   if(state === STATE_GAME_OVER) drawCenterText([
@@ -1772,6 +1932,14 @@ function gameLoop(){
 
   requestAnimationFrame(gameLoop);
 }
+
+// ---- Chargement de la sauvegarde au démarrage ----
+savedData = loadGame();
+applySavedData(savedData);
+
+// Sauvegarde automatique régulière pendant qu'on joue (au cas où la page serait rechargée/fermée en plein niveau)
+// et systématiquement juste avant de quitter/recharger la page.
+window.addEventListener('beforeunload', saveGame);
 
 initLevel();
 gameLoop();
