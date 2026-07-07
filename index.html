@@ -1640,8 +1640,17 @@ function controlsP1(){
 
   if(onlineMode && state === STATE_PLAYING && (Date.now() - lastInputTime >= BOT_IDLE_MS)){
     botTakeoverActive = true;
-    const p = isHost ? (onlineHostPlayers[myId] || player) : (myPredPlayer || player);
-    return computeAutoPilotControls(p);
+    if(isHost){
+      // L'hôte a l'état de jeu réel et à jour : il peut calculer sa propre esquive en confiance.
+      return computeAutoPilotControls(onlineHostPlayers[myId] || player);
+    }
+    // IMPORTANT : un invité ne doit JAMAIS calculer lui-même ses mouvements de pilotage automatique.
+    // Son état local (ennemis/projectiles/boss) provient du dernier instantané réseau reçu, donc en
+    // retard par rapport à l'hôte. Si chaque machine décidait seule de l'esquive à partir de données
+    // différentes, les deux simulations divergeraient (l'hôte peut voir un coup mortel que l'invité,
+    // lui, ne voit pas se produire, ou inversement). On envoie donc "aucune touche" : c'est l'hôte,
+    // seule source de vérité, qui calcule et pilote ce joueur (voir getOnlineControlsFor).
+    return raw;
   }
   return raw;
 }
@@ -1738,6 +1747,7 @@ function leaveOnlineRoom(){
   onlineMode = false; isHost = false; roomCode = null;
   remoteInputs = {}; onlineMeta = {}; onlineHostPlayers = {}; remoteSnapshot = null;
   renderPlayers = {}; lastSentCoinsTaken = null; myPredPlayer = null; lastKnownLives = null;
+  hostLastActiveTime = {}; hostBotActive = {};
   document.getElementById('onlineLeaveBtn').style.display = 'none';
   onlineSetStatus('Non connecté.');
   state = STATE_MENU;
@@ -2663,9 +2673,26 @@ function ensureHostPlayer(id){
   }
 }
 
+// Détection d'inactivité CÔTÉ HÔTE pour chaque invité : basée sur l'horloge de l'hôte et sur les
+// touches réellement reçues (jamais sur un drapeau envoyé par l'invité), pour que la décision
+// "ce joueur est inactif" et le pilotage automatique qui en découle soient calculés une seule fois,
+// par une seule machine faisant autorité — évitant que l'hôte et l'invité voient des résultats différents.
+let hostLastActiveTime = {};
+let hostBotActive = {};
+function isControlsIdle(c){ return !c || !(c.left || c.right || c.down || c.jump || c.shoot); }
+
 function getOnlineControlsFor(id){
   if(id === myId) return controlsP1();
-  return remoteInputs[id] || {left:false,right:false,down:false,jump:false,shoot:false};
+  const raw = remoteInputs[id] || {left:false,right:false,down:false,jump:false,shoot:false};
+  const now = Date.now();
+  if(hostLastActiveTime[id] == null || !isControlsIdle(raw)) hostLastActiveTime[id] = isControlsIdle(raw) ? (hostLastActiveTime[id] || now) : now;
+  const idleFor = now - hostLastActiveTime[id];
+  if(idleFor >= BOT_IDLE_MS){
+    hostBotActive[id] = true;
+    return computeAutoPilotControls(onlineHostPlayers[id]);
+  }
+  hostBotActive[id] = false;
+  return raw;
 }
 
 function updateOnlineHost(){
@@ -2675,7 +2702,7 @@ function updateOnlineHost(){
   if(!onlineMeta[myId]) onlineMeta[myId] = { charId: currentCharacterId, slot: 0 };
   const ids = Object.keys(onlineMeta);
   ids.forEach(id => ensureHostPlayer(id));
-  Object.keys(onlineHostPlayers).forEach(id => { if(!onlineMeta[id]) delete onlineHostPlayers[id]; });
+  Object.keys(onlineHostPlayers).forEach(id => { if(!onlineMeta[id]){ delete onlineHostPlayers[id]; delete hostLastActiveTime[id]; delete hostBotActive[id]; } });
 
   const activeIds = Object.keys(onlineHostPlayers);
   activeIds.forEach(id => {
@@ -2781,7 +2808,8 @@ function updateOnlineHost(){
     const playersSnap = {};
     activeIds.forEach(id => {
       const p = onlineHostPlayers[id];
-      playersSnap[id] = { x: Math.round(p.x), y: Math.round(p.y), vx: Math.round(p.vx*10)/10, facing: p.facing, onGround: p.onGround, crouch: p.h === PLAYER_CROUCH_HEIGHT, inv: p.invincibleTimer > 0 ? 1 : 0, charId: (onlineMeta[id]&&onlineMeta[id].charId)||'zkr', slot: (onlineMeta[id]&&onlineMeta[id].slot)||0 };
+      const botFlag = (id === myId) ? botTakeoverActive : !!hostBotActive[id];
+      playersSnap[id] = { x: Math.round(p.x), y: Math.round(p.y), vx: Math.round(p.vx*10)/10, facing: p.facing, onGround: p.onGround, crouch: p.h === PLAYER_CROUCH_HEIGHT, inv: p.invincibleTimer > 0 ? 1 : 0, charId: (onlineMeta[id]&&onlineMeta[id].charId)||'zkr', slot: (onlineMeta[id]&&onlineMeta[id].slot)||0, bot: botFlag ? 1 : 0 };
     });
     const payload = {
       world: worldIndex, level: levelIndex, state,
@@ -2873,20 +2901,42 @@ function updateOnlineGuest(){
   // (RTT) — la comparer en direct revient à tirer le perso vers son propre passé, ce qui combat
   // l'input et donne une sensation de lag pire qu'avant. On ne recale que sur un vrai événement
   // de jeu sans ambiguïté (dégâts/mort), détecté via la baisse du nombre de vies.
+  //
+  // EXCEPTION : pendant que l'hôte pilote ce joueur en automatique (bot d'inactivité), on n'utilise
+  // PAS la prédiction locale — on affiche directement la position faisant autorité reçue de l'hôte.
+  // Sans ça, l'hôte calculerait un déplacement/une esquive avec l'état réel du jeu pendant que
+  // l'invité, lui, prédirait un déplacement différent avec un état local en retard : les deux
+  // écrans finiraient par diverger (l'un voit une mort que l'autre ne voit pas). En pilotage
+  // automatique il n'y a de toute façon aucune touche locale à prédire, donc suivre l'hôte
+  // à l'identique est à la fois plus simple et strictement plus fiable.
+  const myPs = remoteSnapshot.players && remoteSnapshot.players[myId];
+  const iAmBotControlled = !!(myPs && myPs.bot);
+
   if(state === STATE_PLAYING && myPredPlayer && level){
     level.movingPlatforms.forEach(mp => mp.update(frameTick)); // nécessaire pour que les collisions locales (et leur affichage) restent justes
-    myPredPlayer.update(controlsP1(), level.solids);
 
-    // Rebond en sautant sur un ennemi : uniquement l'effet VISUEL (vy = -10), reproduit ici
-    // pour que ça se sente pareil que chez l'hôte. Le vrai résultat (ennemi tué/touché, score)
-    // reste calculé UNIQUEMENT par l'hôte et arrive via l'instantané (enemies, score) — on ne
-    // fait ici aucun dégât et on ne touche pas au score pour ne pas désynchroniser la partie.
-    enemies.forEach(e => {
-      if(!e.alive) return;
-      if(rectsOverlap(myPredPlayer.rect, e.rect) && myPredPlayer.vy > 0 && myPredPlayer.y + myPredPlayer.h - myPredPlayer.vy <= e.y + 15){
-        myPredPlayer.vy = -10;
-      }
-    });
+    if(iAmBotControlled && myPs){
+      const dx = myPs.x - myPredPlayer.x, dy = myPs.y - myPredPlayer.y;
+      if(Math.abs(dx) > 250 || Math.abs(dy) > 250){ myPredPlayer.x = myPs.x; myPredPlayer.y = myPs.y; }
+      else { myPredPlayer.x += dx * 0.5; myPredPlayer.y += dy * 0.5; }
+      myPredPlayer.vx = myPs.vx; myPredPlayer.facing = myPs.facing; myPredPlayer.onGround = myPs.onGround;
+      myPredPlayer.h = myPs.crouch ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT;
+      if(myPredPlayer.invincibleTimer > 0) myPredPlayer.invincibleTimer--;
+      else if(myPs.inv) myPredPlayer.invincibleTimer = 40;
+    } else {
+      myPredPlayer.update(controlsP1(), level.solids);
+
+      // Rebond en sautant sur un ennemi : uniquement l'effet VISUEL (vy = -10), reproduit ici
+      // pour que ça se sente pareil que chez l'hôte. Le vrai résultat (ennemi tué/touché, score)
+      // reste calculé UNIQUEMENT par l'hôte et arrive via l'instantané (enemies, score) — on ne
+      // fait ici aucun dégât et on ne touche pas au score pour ne pas désynchroniser la partie.
+      enemies.forEach(e => {
+        if(!e.alive) return;
+        if(rectsOverlap(myPredPlayer.rect, e.rect) && myPredPlayer.vy > 0 && myPredPlayer.y + myPredPlayer.h - myPredPlayer.vy <= e.y + 15){
+          myPredPlayer.vy = -10;
+        }
+      });
+    }
   }
   if(lastKnownLives != null && lives < lastKnownLives && myPredPlayer && level){
     myPredPlayer.reset(level.startX, level.startY);
