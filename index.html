@@ -1270,6 +1270,10 @@ try {
     appId: "1:136791783166:web:4cd9de3bc2b880e28917af"
   });
   fbDB = firebase.database();
+  // Diagnostic : état réel de la connexion socket vers Firebase.
+  // Si ça oscille souvent entre true/false, la connexion est instable (coupures/reconnexions),
+  // ce qui provoque exactement le genre de à-coups signalés.
+  fbDB.ref('.info/connected').on('value', snap => { fbConnected = snap.val(); });
 } catch(e){ console.warn('Firebase indisponible :', e); }
 
 let onlineMode = false;
@@ -1283,6 +1287,8 @@ let onlineHostPlayers = {};
 let remoteSnapshot = null;
 let renderPlayers = {}; // positions lissées (invité) pour éviter l'effet de "téléportation" entre 2 mises à jour réseau
 let onlineWorld = 0, onlineLevel = 0;
+let lastPingMs = null;      // RTT réel mesuré vers le serveur Firebase (aller-retour d'écriture)
+let fbConnected = null;     // état de la connexion socket Firebase (.info/connected)
 let lastOnlineSendTick = -999, lastOnlineBroadcastTick = -999;
 let lastSentCoinsTaken = null; // évite de renvoyer tout le tableau des pièces quand rien n'a changé
 const ONLINE_INPUT_SEND_INTERVAL = 3;
@@ -1294,6 +1300,18 @@ function randomRoomCode(){
   for(let i=0;i<5;i++) c += chars[Math.floor(Math.random()*chars.length)];
   return c;
 }
+
+// Mesure la vraie latence (aller-retour) vers le serveur Firebase : on écrit une petite valeur
+// et on chronomètre le temps jusqu'à ce que l'écriture soit confirmée (ack) par le serveur.
+// C'est LA mesure fiable pour savoir si le problème vient réellement de Firebase/du réseau.
+function measureFirebasePing(){
+  if(!onlineRoomRef) return;
+  const t0 = performance.now();
+  onlineRoomRef.child('diag/' + myId).set(firebase.database.ServerValue.TIMESTAMP)
+    .then(() => { lastPingMs = Math.round(performance.now() - t0); })
+    .catch(() => { lastPingMs = -1; });
+}
+setInterval(() => { if(onlineMode) measureFirebasePing(); }, 2000);
 
 function onlineSetStatus(msg){
   const el = document.getElementById('onlineStatus');
@@ -2556,7 +2574,11 @@ function gameLoop(){
     if(onlineMode){
       const nbPlayers = isHost ? Object.keys(onlineHostPlayers).length : (remoteSnapshot && remoteSnapshot.players ? Object.keys(remoteSnapshot.players).length : 1);
       ctx.fillText(`VIES (ÉQUIPE) : ${"❤️".repeat(Math.max(0, lives))}   |   SCORE : ${score}`, 20, 30);
-      ctx.textAlign = 'right'; ctx.fillText(`${theme.name} - ${LEVEL_NAMES[levelIndex]}   |   Salon ${roomCode} (${nbPlayers} joueurs)`, WIDTH - 20, 30); ctx.textAlign = 'left';
+      const pingLabel = lastPingMs == null ? '...' : (lastPingMs < 0 ? 'erreur' : `${lastPingMs}ms`);
+      const connLabel = fbConnected === false ? '⚠️ DÉCONNECTÉ' : '';
+      ctx.textAlign = 'right';
+      ctx.fillText(`${theme.name} - ${LEVEL_NAMES[levelIndex]}   |   Salon ${roomCode} (${nbPlayers} joueurs)   |   Ping: ${pingLabel} ${connLabel}`, WIDTH - 20, 30);
+      ctx.textAlign = 'left';
     } else if(coopMode){
       ctx.fillText(`VIES (ÉQUIPE) : ${"❤️".repeat(Math.max(0, lives))}   |   SCORE : ${score}`, 20, 30);
       ctx.textAlign = 'right'; ctx.fillText(`${theme.name} - ${LEVEL_NAMES[levelIndex]}   |   J2 = vert`, WIDTH - 20, 30); ctx.textAlign = 'left';
