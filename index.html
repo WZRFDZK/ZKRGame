@@ -1281,8 +1281,10 @@ let remoteInputs = {};
 let onlineMeta = {};
 let onlineHostPlayers = {};
 let remoteSnapshot = null;
+let renderPlayers = {}; // positions lissées (invité) pour éviter l'effet de "téléportation" entre 2 mises à jour réseau
 let onlineWorld = 0, onlineLevel = 0;
 let lastOnlineSendTick = -999, lastOnlineBroadcastTick = -999;
+let lastSentCoinsTaken = null; // évite de renvoyer tout le tableau des pièces quand rien n'a changé
 const ONLINE_INPUT_SEND_INTERVAL = 3;
 const ONLINE_BROADCAST_INTERVAL = 5;
 
@@ -1310,6 +1312,7 @@ function leaveOnlineRoom(){
   cleanupOnlineRefs();
   onlineMode = false; isHost = false; roomCode = null;
   remoteInputs = {}; onlineMeta = {}; onlineHostPlayers = {}; remoteSnapshot = null;
+  renderPlayers = {}; lastSentCoinsTaken = null;
   document.getElementById('onlineLeaveBtn').style.display = 'none';
   onlineSetStatus('Non connecté.');
   state = STATE_MENU;
@@ -1353,34 +1356,57 @@ function joinOnlineRoom(code){
   if(!fbDB){ onlineSetStatus("Connexion à Firebase indisponible (vérifie ta config/connexion)."); return; }
   code = (code || '').toUpperCase().trim();
   if(!code){ onlineSetStatus('Entre un code de salon.'); return; }
-  const testRef = fbDB.ref('rooms/' + code + '/meta');
-  testRef.once('value').then(snap => {
-    if(!snap.exists()){ onlineSetStatus(`Aucun salon "${code}" trouvé.`); return; }
+
+  onlineSetStatus(`Connexion au salon ${code}...`);
+  // On s'abonne aux données du salon EN PARALLÈLE de la vérification d'existence
+  // (au lieu de faire les deux allers-retours réseau l'un après l'autre) :
+  // ça réduit sensiblement le temps d'attente pour rejoindre un salon.
+  const candidateRoomRef = fbDB.ref('rooms/' + code);
+  const candidatePlayersRef = candidateRoomRef.child('players');
+  const candidateStateRef = candidateRoomRef.child('state');
+  const candidatePresenceRef = candidatePlayersRef.child(myId);
+  let joined = false;
+
+  candidatePlayersRef.on('value', snap2 => {
+    if(!joined) return;
+    const val = snap2.val() || {};
+    const ids = Object.keys(val).sort((a,b) => (val[a].joinedAt||0) - (val[b].joinedAt||0)).slice(0, 4);
+    const newMeta = {};
+    ids.forEach((id, i) => { newMeta[id] = { charId: val[id].charId || 'zkr', slot: i }; });
+    onlineMeta = newMeta;
+  });
+  candidateStateRef.on('value', snap2 => {
+    if(!joined) return;
+    remoteSnapshot = snap2.val() || null;
+  });
+
+  candidateRoomRef.child('meta').once('value').then(snap => {
+    if(!snap.exists()){
+      candidatePlayersRef.off(); candidateStateRef.off();
+      onlineSetStatus(`Aucun salon "${code}" trouvé.`);
+      return;
+    }
+    joined = true;
     roomCode = code; isHost = false; onlineMode = true;
-    onlineRoomRef = fbDB.ref('rooms/' + roomCode);
+    onlineRoomRef = candidateRoomRef;
     onlineInputsRef = onlineRoomRef.child('inputs');
-    onlineStateRef = onlineRoomRef.child('state');
-    onlinePlayersRef = onlineRoomRef.child('players');
-    onlinePresenceRef = onlinePlayersRef.child(myId);
+    onlineStateRef = candidateStateRef;
+    onlinePlayersRef = candidatePlayersRef;
+    onlinePresenceRef = candidatePresenceRef;
 
     onlinePresenceRef.set({ charId: currentCharacterId, slot: 99, joinedAt: Date.now() });
     onlinePresenceRef.onDisconnect().remove();
 
-    onlinePlayersRef.on('value', snap2 => {
-      const val = snap2.val() || {};
-      const ids = Object.keys(val).sort((a,b) => (val[a].joinedAt||0) - (val[b].joinedAt||0)).slice(0, 4);
-      const newMeta = {};
-      ids.forEach((id, i) => { newMeta[id] = { charId: val[id].charId || 'zkr', slot: i }; });
-      onlineMeta = newMeta;
-    });
-    onlineStateRef.on('value', snap2 => { remoteSnapshot = snap2.val() || null; });
-
     document.getElementById('onlineLeaveBtn').style.display = '';
     onlineSetStatus(`Connecté au salon ${roomCode}. En attente de l'hôte...`);
     remoteSnapshot = null; onlineWorld = -1; onlineLevel = -1;
+    renderPlayers = {};
     state = STATE_PLAYING;
     closeSettings();
-  }).catch(() => onlineSetStatus("Erreur de connexion à Firebase."));
+  }).catch(() => {
+    candidatePlayersRef.off(); candidateStateRef.off();
+    onlineSetStatus("Erreur de connexion à Firebase.");
+  });
 }
 
 function ensureOnlineLevel(w, l){
@@ -1467,7 +1493,7 @@ function initLevel(){
   projectiles = [];
   cameraX = 0; cameraX2 = 0;
   livesLostThisLevel = 0;
-  if(onlineMode && isHost){ onlineHostPlayers = {}; }
+  if(onlineMode && isHost){ onlineHostPlayers = {}; lastSentCoinsTaken = null; }
 }
 
 function advanceAfterLevelClear(){
@@ -2226,14 +2252,21 @@ function updateOnlineHost(){
       const p = onlineHostPlayers[id];
       playersSnap[id] = { x: Math.round(p.x), y: Math.round(p.y), vx: Math.round(p.vx*10)/10, facing: p.facing, onGround: p.onGround, crouch: p.h === PLAYER_CROUCH_HEIGHT, inv: p.invincibleTimer > 0 ? 1 : 0, charId: (onlineMeta[id]&&onlineMeta[id].charId)||'zkr', slot: (onlineMeta[id]&&onlineMeta[id].slot)||0 };
     });
-    onlineStateRef.set({
+    const payload = {
       world: worldIndex, level: levelIndex, state,
       players: playersSnap,
       enemies: enemies.map(e => ({x: Math.round(e.x), y: Math.round(e.y), dir: e.dir, alive: e.alive, hp: e.hp, maxHp: e.maxHp})),
-      coinsTaken: level.coins.map(c => c.taken ? 1 : 0),
       projectiles: projectiles.map(p => ({x: Math.round(p.x), y: Math.round(p.y), dir: p.dir, color: p.color})),
       score, lives, t: Date.now()
-    }).catch(() => {});
+    };
+    // Le tableau des pièces ne change presque jamais d'une frame à l'autre : on ne le renvoie
+    // que s'il a réellement changé, au lieu de le sérialiser/transmettre ~12 fois par seconde.
+    const coinsTakenArr = level.coins.map(c => c.taken ? 1 : 0);
+    if(!lastSentCoinsTaken || coinsTakenArr.some((v,i) => v !== lastSentCoinsTaken[i])){
+      payload.coinsTaken = coinsTakenArr;
+      lastSentCoinsTaken = coinsTakenArr;
+    }
+    onlineStateRef.set(payload).catch(() => {});
   }
 }
 
@@ -2265,14 +2298,36 @@ function updateOnlineGuest(){
   if(remoteSnapshot.enemies){
     remoteSnapshot.enemies.forEach((es, i) => {
       const e = enemies[i]; if(!e) return;
-      e.x = es.x; e.y = es.y; e.dir = es.dir; e.alive = es.alive; e.hp = es.hp; e.maxHp = es.maxHp;
+      const dx = es.x - e.x, dy = es.y - e.y;
+      // Lissage : on avance progressivement vers la position reçue plutôt que de "sauter" dessus,
+      // sauf changement énorme (spawn/reset/changement de niveau) qu'on applique instantanément.
+      if(!e.alive || !es.alive || Math.abs(dx) > 250 || Math.abs(dy) > 250){ e.x = es.x; e.y = es.y; }
+      else { e.x += dx * 0.35; e.y += dy * 0.35; }
+      e.dir = es.dir; e.alive = es.alive; e.hp = es.hp; e.maxHp = es.maxHp;
     });
   }
   projectiles = (remoteSnapshot.projectiles || []).map(p => {
     const pr = new Projectile(p.x, p.y, p.dir, p.color); pr.life = PROJECTILE_LIFE; return pr;
   });
 
-  const myP = (remoteSnapshot.players && remoteSnapshot.players[myId]) || null;
+  // Lissage des positions des joueurs distants : on interpole chaque frame (60 fps) vers la
+  // dernière valeur reçue (envoyée ~12-20 fois/s par l'hôte) au lieu d'afficher des positions
+  // brutes qui "sautent" à chaque paquet reçu. C'est ce qui donne l'impression de lag/saccades.
+  if(remoteSnapshot.players){
+    Object.keys(remoteSnapshot.players).forEach(id => {
+      const ps = remoteSnapshot.players[id];
+      let rp = renderPlayers[id];
+      if(!rp){ rp = renderPlayers[id] = { x: ps.x, y: ps.y }; }
+      const dx = ps.x - rp.x, dy = ps.y - rp.y;
+      if(Math.abs(dx) > 250 || Math.abs(dy) > 250){ rp.x = ps.x; rp.y = ps.y; } // gros saut = téléportation réelle (mort, reset...)
+      else { rp.x += dx * 0.35; rp.y += dy * 0.35; }
+      rp.facing = ps.facing; rp.vx = ps.vx; rp.onGround = ps.onGround;
+      rp.crouch = ps.crouch; rp.inv = ps.inv; rp.charId = ps.charId; rp.slot = ps.slot;
+    });
+    Object.keys(renderPlayers).forEach(id => { if(!remoteSnapshot.players[id]) delete renderPlayers[id]; });
+  }
+
+  const myP = renderPlayers[myId] || (remoteSnapshot.players && remoteSnapshot.players[myId]) || null;
   if(myP){
     cameraX += ((myP.x - WIDTH/3) - cameraX) * 0.2;
     cameraX = Math.max(0, Math.min(cameraX, level.width - WIDTH));
@@ -2467,7 +2522,7 @@ function gameLoop(){
           });
         } else if(remoteSnapshot && remoteSnapshot.players){
           Object.keys(remoteSnapshot.players).forEach(id => {
-            const ps = remoteSnapshot.players[id];
+            const ps = renderPlayers[id] || remoteSnapshot.players[id];
             const charDef = getCharacterTinted(ps.charId || 'zkr', ONLINE_TINTS[(ps.slot||0) % ONLINE_TINTS.length]);
             if(!ps.inv || frameTick % 8 < 5){
               drawPlayerSprite(ps.x - camX, ps.y, PLAYER_WIDTH, ps.crouch ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT, ps.facing, ps.vx, ps.onGround, ps.crouch, frameTick, charDef);
