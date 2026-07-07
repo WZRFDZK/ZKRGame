@@ -417,8 +417,17 @@ function buildLevel(opts){
     spikes: spikeRects,
     enemyData: enemies,
     goalX: opts.goalX, goalY: goalY,
-    width: opts.width, startX, startY
+    width: opts.width, startX, startY,
+    spawnZone: spawnPlatform
   };
+}
+
+// Le joueur ne peut jamais mourir (pics, ennemis, tirs) tant qu'il se trouve au-dessus de la
+// plateforme de départ du niveau : ça garantit un point de spawn toujours sûr.
+function isInSpawnZone(p){
+  if(!level || !level.spawnZone) return false;
+  const z = level.spawnZone;
+  return (p.x + p.w) > z.x && p.x < (z.x + z.w);
 }
 
 function archetypeClassic(worldIndex, diff){
@@ -625,7 +634,7 @@ function archetypeFinal(worldIndex, diff){
   const bossX = arenaX + 260;
   enemies.push({
     x: bossX, y: GROUND_Y-100, left: arenaX+60, right: arenaX+460,
-    speed: 1.6 + diff*0.3, w: 80, h: 100, hp: 4 + Math.round(diff*1.5), isBoss: true
+    speed: 1.6 + diff*0.3, w: 80, h: 100, hp: 6 + Math.round(diff*2.2), isBoss: true
   });
   return buildLevel({segments, platforms, coins, spikes, enemies, goalX: length+130, width: length+400});
 }
@@ -642,11 +651,12 @@ function generateLevel(wIdx, lIdx){
 function rectsOverlap(a, b){ return !(a.x+a.w <= b.x || a.x >= b.x+b.w || a.y+a.h <= b.y || a.y >= b.y+b.h); }
 
 class Projectile {
-  constructor(x, y, dir, color){
+  constructor(x, y, dir, color, hostile){
     this.x = x; this.y = y; this.w = 16; this.h = 8;
     this.dir = dir; this.vx = PROJECTILE_SPEED * dir;
     this.life = PROJECTILE_LIFE; this.dead = false;
     this.color = color || '#5b93f0';
+    this.hostile = !!hostile;
   }
   get rect(){ return {x:this.x, y:this.y, w:this.w, h:this.h}; }
   update(solids){
@@ -659,24 +669,112 @@ class Projectile {
 
 class Enemy {
   constructor(x, y, left, right, speed, opts={}){
-    this.x=x; this.y=y; this.left=left; this.right=right; this.speed=speed; this.dir=1; this.alive=true;
+    this.x=x; this.y=y; this.left=left; this.right=right; this.baseSpeed=speed; this.speed=speed; this.dir=1; this.alive=true;
     this.w = opts.w || 44; this.h = opts.h || 58;
     this.isBoss = !!opts.isBoss; this.maxHp = opts.hp || 1; this.hp = this.maxHp;
     this.kind = opts.kind || 'thug';
     this.hitFlash = 0;
+    // ----- IA du boss -----
+    this.attackState = 'patrol'; // patrol | telegraph | dash | shoot
+    this.attackKind = null;      // 'dash' | 'shoot'
+    this.attackTimer = 0;
+    this.attackCooldown = this.isBoss ? 100 : 0;
+    this.dashDir = 1;
+    this.enraged = false;
   }
   get rect(){ return {x:this.x, y:this.y, w:this.w, h:this.h}; }
   hit(){
     this.hp--; this.hitFlash = 10;
     if(this.hp <= 0) this.alive = false;
   }
-  update(){
+  update(target){
     if(!this.alive) return;
     if(this.hitFlash > 0) this.hitFlash--;
-    this.x += this.speed*this.dir;
-    if(this.x < this.left){ this.x = this.left; this.dir = 1; }
-    else if(this.x+this.w > this.right){ this.x = this.right-this.w; this.dir = -1; }
+
+    if(!this.isBoss){
+      this.x += this.speed*this.dir;
+      if(this.x < this.left){ this.x = this.left; this.dir = 1; }
+      else if(this.x+this.w > this.right){ this.x = this.right-this.w; this.dir = -1; }
+      return;
+    }
+
+    // ----- Comportement intelligent du boss -----
+    const hpRatio = this.maxHp > 0 ? this.hp / this.maxHp : 1;
+    this.enraged = hpRatio <= 0.5;
+    const rageMul = hpRatio <= 0.25 ? 1.9 : (hpRatio <= 0.5 ? 1.45 : 1);
+    this.speed = this.baseSpeed * rageMul;
+    const cx = this.x + this.w/2;
+    const tx = target ? target.x + target.w/2 : cx;
+
+    if(this.attackState === 'patrol'){
+      // Le boss traque activement le joueur au lieu de faire juste des allers-retours bêtes
+      if(tx < cx - 6) this.dir = -1;
+      else if(tx > cx + 6) this.dir = 1;
+      this.x += this.speed * this.dir;
+      if(this.x < this.left){ this.x = this.left; this.dir = 1; }
+      else if(this.x + this.w > this.right){ this.x = this.right - this.w; this.dir = -1; }
+
+      if(target){
+        this.attackCooldown--;
+        if(this.attackCooldown <= 0){
+          const dist = Math.abs(tx - cx);
+          this.attackKind = (dist > 230 || Math.random() < 0.45) ? 'shoot' : 'dash';
+          this.attackState = 'telegraph';
+          this.attackTimer = this.enraged ? 16 : 24;
+          this.dashDir = tx >= cx ? 1 : -1;
+        }
+      }
+    } else if(this.attackState === 'telegraph'){
+      // Le boss se prépare (immobile, clignote) : ça laisse une fenêtre pour réagir/riposter
+      this.attackTimer--;
+      if(this.attackTimer <= 0){
+        if(this.attackKind === 'dash'){
+          this.attackState = 'dash';
+          this.attackTimer = 24;
+          this.dir = this.dashDir;
+        } else {
+          this.attackState = 'shootFire';
+          this.attackTimer = 1;
+        }
+      }
+    } else if(this.attackState === 'dash'){
+      // Charge rapide vers la position visée
+      this.x += this.speed * 3.2 * this.dir;
+      if(this.x <= this.left){ this.x = this.left; this.attackTimer = 0; }
+      if(this.x + this.w >= this.right){ this.x = this.right - this.w; this.attackTimer = 0; }
+      this.attackTimer--;
+      if(this.attackTimer <= 0){
+        this.attackState = 'patrol';
+        this.attackCooldown = this.enraged ? 65 : 105;
+      }
+    } else if(this.attackState === 'shootFire'){
+      if(target) spawnBossProjectiles(this, target);
+      this.attackState = 'patrol';
+      this.attackCooldown = this.enraged ? 75 : 125;
+    }
   }
+}
+
+function spawnBossProjectiles(boss, target){
+  const bcx = boss.x + boss.w/2, bcy = boss.y + boss.h*0.35;
+  const tcx = target.x + target.w/2;
+  const dir = tcx < bcx ? -1 : 1;
+  const shots = boss.enraged ? 2 : 1;
+  for(let i=0;i<shots;i++){
+    const p = new Projectile(bcx + dir*boss.w*0.4, bcy + i*14, dir, '#ff3c3c', true);
+    projectiles.push(p);
+  }
+}
+
+function nearestPlayer(players, e){
+  if(!players || !players.length) return null;
+  const cx = e.x + e.w/2;
+  let best = players[0], bestD = Infinity;
+  for(const p of players){
+    const d = Math.abs((p.x + p.w/2) - cx);
+    if(d < bestD){ bestD = d; best = p; }
+  }
+  return best;
 }
 
 class MovingPlatform {
@@ -2202,7 +2300,7 @@ function updateOnlineHost(){
 
   activeIds.forEach(id => {
     const p = onlineHostPlayers[id];
-    if(p.y > DEATH_Y) damagePlayerOnline(p);
+    if(p.y > DEATH_Y && !isInSpawnZone(p)) damagePlayerOnline(p);
   });
 
   level.coins.forEach(c => {
@@ -2213,7 +2311,8 @@ function updateOnlineHost(){
     }
   });
 
-  enemies.forEach(e => { if(e.alive) e.update(); });
+  const onlinePlayerList = activeIds.map(id => onlineHostPlayers[id]);
+  enemies.forEach(e => { if(e.alive) e.update(nearestPlayer(onlinePlayerList, e)); });
   activeIds.forEach(id => {
     const p = onlineHostPlayers[id];
     enemies.forEach(e => {
@@ -2223,7 +2322,7 @@ function updateOnlineHost(){
           e.hit(); p.vy = -10;
           score += e.alive ? 1 : (e.isBoss ? 20 : 2);
           if(e.isBoss && !e.alive) bossesDefeated++;
-        } else if(p.invincibleTimer <= 0){ damagePlayerOnline(p); }
+        } else if(p.invincibleTimer <= 0 && !isInSpawnZone(p)){ damagePlayerOnline(p); }
       }
     });
   });
@@ -2232,6 +2331,7 @@ function updateOnlineHost(){
   enemies.forEach(e => {
     if(!e.alive) return;
     for(const p of projectiles){
+      if(p.hostile) continue; // les tirs du boss ne blessent pas les ennemis
       if(!p.dead && rectsOverlap(p.rect, e.rect)){
         p.dead = true;
         e.hit();
@@ -2241,11 +2341,20 @@ function updateOnlineHost(){
       }
     }
   });
+  activeIds.forEach(id => {
+    const p = onlineHostPlayers[id];
+    for(const pr of projectiles){
+      if(pr.hostile && !pr.dead && rectsOverlap(p.rect, pr.rect)){
+        pr.dead = true;
+        if(p.invincibleTimer <= 0 && !isInSpawnZone(p)) damagePlayerOnline(p);
+      }
+    }
+  });
   projectiles = projectiles.filter(p => !p.dead);
 
   activeIds.forEach(id => {
     const p = onlineHostPlayers[id];
-    level.spikes.forEach(s => { if(state === STATE_PLAYING && rectsOverlap(p.rect, s) && p.invincibleTimer <= 0) damagePlayerOnline(p); });
+    level.spikes.forEach(s => { if(state === STATE_PLAYING && rectsOverlap(p.rect, s) && p.invincibleTimer <= 0 && !isInSpawnZone(p)) damagePlayerOnline(p); });
   });
 
   const bossAlive = enemies.some(e => e.isBoss && e.alive);
@@ -2280,7 +2389,7 @@ function updateOnlineHost(){
       world: worldIndex, level: levelIndex, state,
       players: playersSnap,
       enemies: enemies.map(e => ({x: Math.round(e.x), y: Math.round(e.y), dir: e.dir, alive: e.alive, hp: e.hp, maxHp: e.maxHp})),
-      projectiles: projectiles.map(p => ({x: Math.round(p.x), y: Math.round(p.y), dir: p.dir, color: p.color})),
+      projectiles: projectiles.map(p => ({x: Math.round(p.x), y: Math.round(p.y), dir: p.dir, color: p.color, h: p.hostile ? 1 : 0})),
       score, lives, t: Date.now()
     };
     // Le tableau des pièces ne change presque jamais d'une frame à l'autre : on ne le renvoie
@@ -2334,7 +2443,7 @@ function updateOnlineGuest(){
     });
   }
   projectiles = (remoteSnapshot.projectiles || []).map(p => {
-    const pr = new Projectile(p.x, p.y, p.dir, p.color); pr.life = PROJECTILE_LIFE; return pr;
+    const pr = new Projectile(p.x, p.y, p.dir, p.color, !!p.h); pr.life = PROJECTILE_LIFE; return pr;
   });
 
   // Lissage des positions des AUTRES joueurs distants : on interpole chaque frame (60 fps) vers la
@@ -2416,7 +2525,7 @@ function gameLoop(){
 
     const activePlayers = coopMode ? [player, player2] : [player];
 
-    activePlayers.forEach(p => { if(p.y > DEATH_Y) damagePlayer(p); });
+    activePlayers.forEach(p => { if(p.y > DEATH_Y && !isInSpawnZone(p)) damagePlayer(p); });
     level.coins.forEach(c => {
       if(c.taken) return;
       for(const p of activePlayers){
@@ -2424,7 +2533,7 @@ function gameLoop(){
       }
     });
 
-    enemies.forEach(e => { if(state === STATE_PLAYING && e.alive) e.update(); });
+    enemies.forEach(e => { if(state === STATE_PLAYING && e.alive) e.update(nearestPlayer(activePlayers, e)); });
     activePlayers.forEach(p => {
       enemies.forEach(e => {
         if(state !== STATE_PLAYING || !e.alive) return;
@@ -2433,7 +2542,7 @@ function gameLoop(){
             e.hit(); p.vy = -10;
             score += e.alive ? 1 : (e.isBoss ? 20 : 2);
             if(e.isBoss && !e.alive) bossesDefeated++;
-          } else if(p.invincibleTimer <= 0){ damagePlayer(p); }
+          } else if(p.invincibleTimer <= 0 && !isInSpawnZone(p)){ damagePlayer(p); }
         }
       });
     });
@@ -2442,6 +2551,7 @@ function gameLoop(){
     enemies.forEach(e => {
       if(!e.alive) return;
       for(const p of projectiles){
+        if(p.hostile) continue; // les tirs du boss ne blessent pas les ennemis
         if(!p.dead && rectsOverlap(p.rect, e.rect)){
           p.dead = true;
           e.hit();
@@ -2451,11 +2561,20 @@ function gameLoop(){
         }
       }
     });
+    activePlayers.forEach(p => {
+      if(state !== STATE_PLAYING) return;
+      for(const pr of projectiles){
+        if(pr.hostile && !pr.dead && rectsOverlap(p.rect, pr.rect)){
+          pr.dead = true;
+          if(p.invincibleTimer <= 0 && !isInSpawnZone(p)) damagePlayer(p);
+        }
+      }
+    });
     projectiles = projectiles.filter(p => !p.dead);
 
     if(state === STATE_PLAYING){
       activePlayers.forEach(p => {
-        level.spikes.forEach(s => { if(state === STATE_PLAYING && rectsOverlap(p.rect, s) && p.invincibleTimer <= 0) damagePlayer(p); });
+        level.spikes.forEach(s => { if(state === STATE_PLAYING && rectsOverlap(p.rect, s) && p.invincibleTimer <= 0 && !isInSpawnZone(p)) damagePlayer(p); });
       });
     }
     const bossAlive = enemies.some(e => e.isBoss && e.alive);
@@ -2555,6 +2674,18 @@ function gameLoop(){
         if(e.isBoss) drawBossSprite(e.kind, e.x, e.y, e.w, e.h, frameTick, e.dir);
         else drawEnemySprite(e.kind, e.x, e.y, e.w, e.h, frameTick, e.dir);
         ctx.restore();
+        if(e.isBoss && e.attackState === 'telegraph'){
+          // Signal clair avant l'attaque : le boss "charge" visuellement, le joueur peut réagir
+          const pulse = 0.5 + 0.5*Math.sin(frameTick*0.6);
+          ctx.save();
+          ctx.globalAlpha = 0.55 + 0.35*pulse;
+          ctx.fillStyle = e.attackKind === 'dash' ? '#ff8a3c' : '#ff3c6a';
+          ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center';
+          ctx.fillText('!', e.x + e.w/2, e.y - 14 - pulse*4);
+          ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(e.x+e.w/2, e.y+e.h/2, Math.max(e.w,e.h)*0.62 + pulse*4, 0, Math.PI*2); ctx.stroke();
+          ctx.restore();
+        }
       });
       ctx.fillStyle = '#3a3a3a'; ctx.fillRect(level.goalX-5, level.goalY-140, 8, 140);
       ctx.fillStyle = rgb(theme.accent);
