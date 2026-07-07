@@ -1287,6 +1287,7 @@ let onlineHostPlayers = {};
 let remoteSnapshot = null;
 let renderPlayers = {}; // positions lissées (invité) pour les AUTRES joueurs (pas de prédiction possible, on n'a pas leurs touches)
 let myPredPlayer = null; // instance Player simulée localement à 60 fps chez l'invité, pour SON PROPRE personnage (prédiction côté client)
+let lastKnownLives = null; // sert à détecter une perte de vie (dégâts/mort) pour recaler le perso prédit, sans comparer de positions
 let onlineWorld = 0, onlineLevel = 0;
 let lastPingMs = null;      // RTT réel mesuré vers le serveur Firebase (aller-retour d'écriture)
 let fbConnected = null;     // état de la connexion socket Firebase (.info/connected)
@@ -1331,7 +1332,7 @@ function leaveOnlineRoom(){
   cleanupOnlineRefs();
   onlineMode = false; isHost = false; roomCode = null;
   remoteInputs = {}; onlineMeta = {}; onlineHostPlayers = {}; remoteSnapshot = null;
-  renderPlayers = {}; lastSentCoinsTaken = null; myPredPlayer = null;
+  renderPlayers = {}; lastSentCoinsTaken = null; myPredPlayer = null; lastKnownLives = null;
   document.getElementById('onlineLeaveBtn').style.display = 'none';
   onlineSetStatus('Non connecté.');
   state = STATE_MENU;
@@ -1419,7 +1420,7 @@ function joinOnlineRoom(code){
     document.getElementById('onlineLeaveBtn').style.display = '';
     onlineSetStatus(`Connecté au salon ${roomCode}. En attente de l'hôte...`);
     remoteSnapshot = null; onlineWorld = -1; onlineLevel = -1;
-    renderPlayers = {}; myPredPlayer = null;
+    renderPlayers = {}; myPredPlayer = null; lastKnownLives = null;
     state = STATE_PLAYING;
     closeSettings();
   }).catch(() => {
@@ -2358,25 +2359,22 @@ function updateOnlineGuest(){
   // On simule la physique localement à 60 fps, exactement comme le fait l'hôte, à partir de
   // ses propres touches — au lieu d'attendre les paquets réseau (~12/s). Ça donne la même
   // fréquence/réactivité des deux côtés et supprime l'effet "mou"/saturé au déplacement.
-  // On corrige ensuite en douceur vers la position réelle de l'hôte (dégâts, collisions avec
-  // les ennemis, etc. que l'invité ne simule pas) pour ne jamais diverger durablement.
+  //
+  // IMPORTANT : on ne recale PAS en comparant en continu la position prédite à la position reçue
+  // de l'hôte, car cette dernière représente toujours "où j'étais il y a un aller-retour réseau"
+  // (RTT) — la comparer en direct revient à tirer le perso vers son propre passé, ce qui combat
+  // l'input et donne une sensation de lag pire qu'avant. On ne recale que sur un vrai événement
+  // de jeu sans ambiguïté (dégâts/mort), détecté via la baisse du nombre de vies.
   if(state === STATE_PLAYING && myPredPlayer && level){
     level.movingPlatforms.forEach(mp => mp.update(frameTick)); // nécessaire pour que les collisions locales (et leur affichage) restent justes
     myPredPlayer.update(controlsP1(), level.solids);
   }
-  const hostMe = remoteSnapshot.players && remoteSnapshot.players[myId];
-  if(hostMe && myPredPlayer){
-    const dx = hostMe.x - myPredPlayer.x, dy = hostMe.y - myPredPlayer.y;
-    if(Math.abs(dx) > 200 || Math.abs(dy) > 200){
-      // Grosse divergence (mort/reset/téléportation) : on recale instantanément.
-      myPredPlayer.x = hostMe.x; myPredPlayer.y = hostMe.y; myPredPlayer.vx = 0; myPredPlayer.vy = 0;
-    } else if(Math.abs(dx) > 6 || Math.abs(dy) > 6){
-      // Petite dérive : correction douce et progressive, invisible à l'oeil.
-      myPredPlayer.x += dx * 0.08; myPredPlayer.y += dy * 0.08;
-    }
+  if(lastKnownLives != null && lives < lastKnownLives && myPredPlayer && level){
+    myPredPlayer.reset(level.startX, level.startY);
   }
+  lastKnownLives = lives;
 
-  const camTargetX = myPredPlayer ? myPredPlayer.x : ((hostMe && hostMe.x) || 0);
+  const camTargetX = myPredPlayer ? myPredPlayer.x : 0;
   cameraX += ((camTargetX - WIDTH/3) - cameraX) * 0.1;
   cameraX = Math.max(0, Math.min(cameraX, level.width - WIDTH));
 }
