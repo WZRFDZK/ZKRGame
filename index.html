@@ -1508,50 +1508,128 @@ function rawControlsP1(){
 
 // ===================== BOT D'INACTIVITÉ (multijoueur en ligne) =====================
 // Si un joueur reste inactif 10 secondes en pleine partie en ligne, un pilote automatique
-// prend le relais et fait avancer son personnage vers l'objectif (saute les trous, murs,
-// pics et ennemis rencontrés en chemin) jusqu'à ce que le joueur reprenne la main.
+// prend le relais et fait avancer son personnage vers l'objectif. Ce pilote est conçu pour
+// éviter toute mort évitable : trous, murs, pics, ennemis, tirs hostiles et charges de boss,
+// tout en restant fluide (décisions basées sur la vraie physique du saut, pas de tremblements).
 const BOT_IDLE_MS = 10000;
 let lastInputTime = Date.now();
 let botTakeoverActive = false;
 
 function resetBotIdleTimer(){ lastInputTime = Date.now(); botTakeoverActive = false; }
 
+// Portée horizontale d'un saut à vitesse de course, calculée avec la vraie physique du jeu
+// (temps en l'air = 2*|JUMP_VELOCITY|/GRAVITY). Sert à savoir si un trou est franchissable
+// et à déclencher le saut ni trop tôt ni trop tard.
+const BOT_JUMP_AIR_TIME = (2 * Math.abs(JUMP_VELOCITY)) / GRAVITY;
+const BOT_JUMP_RANGE = MOVE_SPEED * BOT_JUMP_AIR_TIME;
+
+// Distance jusqu'au bord du vide devant le joueur, dans une direction donnée
+// (scan progressif du sol sous les pieds ; Infinity si le sol continue au-delà de maxDist).
+function botGroundEdgeDist(p, dir, maxDist){
+  const feetY = p.y + p.h + 4;
+  for(let d = 12; d <= maxDist; d += 8){
+    const sx = p.x + p.w/2 + dir*d;
+    const hasGround = level.solids.some(s => sx > s.x && sx < s.x + s.w && Math.abs(s.y - feetY) < 55);
+    if(!hasGround) return d;
+  }
+  return Infinity;
+}
+
+// Détecte tous les obstacles de terrain (mur, pics, ennemi, trou) dans une direction donnée.
+function botTerrainHazard(p, dir){
+  const chestY = p.y + p.h * 0.45;
+  const feetY = p.y + p.h + 6;
+  const nearX = p.x + (dir > 0 ? p.w + 32 : -32);
+
+  const wallAhead = level.solids.some(s => !s.oneWay &&
+    nearX > s.x && nearX < s.x + s.w && chestY > s.y && chestY < s.y + s.h);
+  const spikeAhead = level.spikes.some(s =>
+    nearX > s.x - 14 && nearX < s.x + s.w + 14 && Math.abs(s.y - feetY) < 48);
+  const enemyAhead = enemies.some(e => e.alive && !e.isBoss &&
+    Math.sign((e.x - p.x) || 1) === dir && Math.abs(e.x - p.x) < 58 && Math.abs(e.y - p.y) < 42);
+  const edgeDist = botGroundEdgeDist(p, dir, BOT_JUMP_RANGE + 30);
+  const pitAhead = edgeDist <= 46;
+
+  return { blocked: wallAhead || spikeAhead || enemyAhead || pitAhead, wallAhead, spikeAhead, enemyAhead, pitAhead };
+}
+
+// Esquive des projectiles hostiles qui se rapprochent : s'accroupir si le tir passe à une
+// hauteur que seule la position debout intercepte, sauter si même accroupi ça toucherait.
+function botProjectileDodge(p){
+  let crouch = false, jump = false;
+  for(const pr of projectiles){
+    if(pr.dead || !pr.hostile) continue;
+    const dx = (pr.x + pr.w/2) - (p.x + p.w/2);
+    const closing = (pr.vx > 0 && dx < 0) || (pr.vx < 0 && dx > 0);
+    if(!closing) continue;
+    const dist = Math.abs(dx);
+    if(dist > 240) continue;
+    const framesToImpact = dist / Math.max(1, Math.abs(pr.vx));
+    if(framesToImpact > 28) continue; // trop tôt pour réagir utilement, on réévaluera plus près
+    const crouchTopY = p.y + (p.h - PLAYER_CROUCH_HEIGHT);
+    const hitsStanding = pr.y + pr.h > p.y && pr.y < p.y + p.h;
+    const hitsCrouched = pr.y + pr.h > crouchTopY && pr.y < p.y + p.h;
+    if(hitsStanding && !hitsCrouched) crouch = true;
+    else if(hitsStanding && hitsCrouched) jump = true;
+  }
+  return { crouch, jump };
+}
+
 function computeAutoPilotControls(p){
   const controls = {left:false,right:false,down:false,jump:false,shoot:false};
   if(!level || !p) return controls;
 
   const goalX = (level.goalX != null) ? level.goalX : (p.x + 200);
-  const dir = (p.x + p.w/2 < goalX) ? 1 : -1;
-  controls.right = dir > 0;
-  controls.left = dir < 0;
+  const goalDir = (p.x + p.w/2 < goalX) ? 1 : -1;
+  const boss = enemies.find(e => e.isBoss && e.alive);
 
-  const lookAheadX = p.x + (dir > 0 ? p.w + 34 : -34);
-  const chestY = p.y + p.h * 0.45;
-  const feetY = p.y + p.h + 6;
-  const farAheadX = p.x + (dir > 0 ? p.w + 58 : -58);
-
-  // Mur solide (non traversable par le bas) juste devant, à hauteur de poitrine -> sauter.
-  const wallAhead = level.solids.some(s => !s.oneWay &&
-    lookAheadX > s.x && lookAheadX < s.x + s.w && chestY > s.y && chestY < s.y + s.h);
-
-  // Y a-t-il un sol un peu plus loin devant les pieds ? Sinon c'est un trou -> sauter pour l'anticiper.
-  const groundAhead = level.solids.some(s =>
-    farAheadX > s.x && farAheadX < s.x + s.w && Math.abs(s.y - feetY) < 45);
-
-  // Pics devant -> sauter par-dessus.
-  const spikeAhead = level.spikes.some(s =>
-    lookAheadX > s.x - 12 && lookAheadX < s.x + s.w + 12 && Math.abs((s.y) - feetY) < 45);
-
-  // Ennemi vivant proche devant, au même niveau -> sauter pour l'écraser ou l'éviter.
-  const enemyAhead = enemies.some(e => e.alive &&
-    Math.abs(e.x - p.x) < 55 && Math.sign(e.x - p.x || 1) === dir && Math.abs(e.y - p.y) < 40);
-
-  if(p.onGround && (wallAhead || spikeAhead || enemyAhead || !groundAhead)){
-    controls.jump = true;
+  // ---- 1) Priorité absolue : esquiver une charge de boss (télégraphiée ou en cours) ----
+  if(boss){
+    const sameLane = Math.abs(boss.y - p.y) < 60;
+    const bcx = boss.x + boss.w/2, pcx = p.x + p.w/2;
+    const closeToBoss = Math.abs(bcx - pcx) < 260;
+    if(sameLane && closeToBoss && boss.attackState === 'telegraph' && boss.attackKind === 'dash'){
+      // Le boss va charger : on recule hors de sa trajectoire (en évitant de reculer dans un mur/trou).
+      const away = pcx < bcx ? -1 : 1;
+      const hzAway = botTerrainHazard(p, away);
+      controls.left = away < 0 && !hzAway.blocked;
+      controls.right = away > 0 && !hzAway.blocked;
+      if(hzAway.blocked && p.onGround) controls.jump = true;
+      return controls;
+    }
+    if(sameLane && Math.abs(bcx - pcx) < 100 && boss.attackState === 'dash'){
+      // Trop tard pour reculer : sauter par-dessus la charge est plus fiable qu'esquiver au sol.
+      controls.jump = p.onGround;
+      controls.left = goalDir < 0; controls.right = goalDir > 0;
+      return controls;
+    }
   }
 
-  // Si un boss est présent, tirer occasionnellement pour aider à le vaincre.
-  if(enemies.some(e => e.isBoss && e.alive)) controls.shoot = (frameTick % 20 < 2);
+  // ---- 2) Avancer vers l'objectif en franchissant murs, pics, ennemis et trous ----
+  controls.left = goalDir < 0;
+  controls.right = goalDir > 0;
+  const hz = botTerrainHazard(p, goalDir);
+  if(p.onGround && hz.blocked) controls.jump = true;
+
+  // ---- 3) Esquiver les tirs hostiles (boss) sans se jeter dans un autre danger ----
+  if(!controls.jump){
+    const dodge = botProjectileDodge(p);
+    if(dodge.jump && p.onGround) controls.jump = true;
+    else if(dodge.crouch && p.onGround && !hz.pitAhead){
+      controls.down = true; controls.left = false; controls.right = false;
+    }
+  }
+
+  // ---- 4) Riposter pour dégager la route (boss ou ennemi au sol face à lui) ----
+  if(boss && boss.attackState !== 'dash'){
+    const bcx = boss.x + boss.w/2, pcx = p.x + p.w/2;
+    const facingBoss = (bcx > pcx && goalDir > 0) || (bcx < pcx && goalDir < 0);
+    if(facingBoss && Math.abs(bcx - pcx) < 380) controls.shoot = (frameTick % 14 < 2);
+  } else if(!boss){
+    const target = enemies.find(e => e.alive && !e.isBoss &&
+      Math.sign((e.x - p.x) || 1) === goalDir && Math.abs(e.x - p.x) < 240 && Math.abs(e.y - p.y) < 50);
+    if(target && !hz.enemyAhead) controls.shoot = (frameTick % 16 < 2);
+  }
 
   return controls;
 }
