@@ -2368,6 +2368,17 @@ function updateOnlineGuest(){
   if(state === STATE_PLAYING && myPredPlayer && level){
     level.movingPlatforms.forEach(mp => mp.update(frameTick)); // nécessaire pour que les collisions locales (et leur affichage) restent justes
     myPredPlayer.update(controlsP1(), level.solids);
+
+    // Rebond en sautant sur un ennemi : uniquement l'effet VISUEL (vy = -10), reproduit ici
+    // pour que ça se sente pareil que chez l'hôte. Le vrai résultat (ennemi tué/touché, score)
+    // reste calculé UNIQUEMENT par l'hôte et arrive via l'instantané (enemies, score) — on ne
+    // fait ici aucun dégât et on ne touche pas au score pour ne pas désynchroniser la partie.
+    enemies.forEach(e => {
+      if(!e.alive) return;
+      if(rectsOverlap(myPredPlayer.rect, e.rect) && myPredPlayer.vy > 0 && myPredPlayer.y + myPredPlayer.h - myPredPlayer.vy <= e.y + 15){
+        myPredPlayer.vy = -10;
+      }
+    });
   }
   if(lastKnownLives != null && lives < lastKnownLives && myPredPlayer && level){
     myPredPlayer.reset(level.startX, level.startY);
