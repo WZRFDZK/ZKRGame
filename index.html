@@ -1650,6 +1650,7 @@ let onlineMeta = {};
 let onlineHostPlayers = {};
 let remoteSnapshot = null;
 let renderPlayers = {}; // positions lissées (invité) pour les AUTRES joueurs (pas de prédiction possible, on n'a pas leurs touches)
+let lastRemoteSnapshotT = null; // sert à détecter précisément l'arrivée d'un NOUVEAU paquet réseau (vs la même donnée relue plusieurs frames de suite)
 let myPredPlayer = null; // instance Player simulée localement à 60 fps chez l'invité, pour SON PROPRE personnage (prédiction côté client)
 let lastKnownLives = null; // sert à détecter une perte de vie (dégâts/mort) pour recaler le perso prédit, sans comparer de positions
 let onlineWorld = 0, onlineLevel = 0;
@@ -1694,8 +1695,8 @@ let lastPingMs = null;      // RTT réel mesuré vers le serveur Firebase (aller
 let fbConnected = null;     // état de la connexion socket Firebase (.info/connected)
 let lastOnlineSendTick = -999, lastOnlineBroadcastTick = -999;
 let lastSentCoinsTaken = null; // évite de renvoyer tout le tableau des pièces quand rien n'a changé
-const ONLINE_INPUT_SEND_INTERVAL = 3;
-const ONLINE_BROADCAST_INTERVAL = 5;
+const ONLINE_INPUT_SEND_INTERVAL = 2;
+const ONLINE_BROADCAST_INTERVAL = 2;
 
 function randomRoomCode(){
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -2984,18 +2985,32 @@ function updateOnlineGuest(){
     const pr = new Projectile(p.x, p.y, p.dir, p.color, !!p.h); pr.life = PROJECTILE_LIFE; return pr;
   });
 
-  // Lissage des positions des AUTRES joueurs distants : on interpole chaque frame (60 fps) vers la
-  // dernière valeur reçue (envoyée ~12-20 fois/s par l'hôte). On ne peut pas faire mieux pour eux
-  // car on n'a pas leurs touches — seule une prédiction locale (ci-dessous) est possible pour SOI-MÊME.
+  // Interpolation des positions des AUTRES joueurs distants : au lieu de "courir après" la
+  // dernière position reçue (ce qui fait qu'à un instant T donné, chaque fenêtre affiche une
+  // position différente selon quand EXACTEMENT elle a reçu son dernier paquet), on extrapole
+  // en continu à 60 fps à partir de la dernière vitesse connue (dead reckoning). Ça donne une
+  // position estimée qui avance en temps réel entre deux paquets, au lieu de rester figée puis
+  // de sauter — et donc un rendu bien plus cohérent entre plusieurs fenêtres/joueurs.
   if(remoteSnapshot.players){
+    const nowPerf = performance.now();
+    const isNewPacket = remoteSnapshot.t !== lastRemoteSnapshotT;
+    if(isNewPacket) lastRemoteSnapshotT = remoteSnapshot.t;
     Object.keys(remoteSnapshot.players).forEach(id => {
       if(id === myId) return; // son propre perso est prédit localement, voir plus bas
       const ps = remoteSnapshot.players[id];
       let rp = renderPlayers[id];
-      if(!rp){ rp = renderPlayers[id] = { x: ps.x, y: ps.y }; }
-      const dx = ps.x - rp.x, dy = ps.y - rp.y;
-      if(Math.abs(dx) > 250 || Math.abs(dy) > 250){ rp.x = ps.x; rp.y = ps.y; } // gros saut = téléportation réelle (mort, reset...)
-      else { rp.x += dx * 0.35; rp.y += dy * 0.35; }
+      if(!rp){ rp = renderPlayers[id] = { x: ps.x, y: ps.y, baseX: ps.x, baseVx: ps.vx || 0, baseT: nowPerf }; }
+      if(isNewPacket){
+        const bigJump = Math.abs(ps.x - rp.x) > 250 || Math.abs(ps.y - rp.y) > 250;
+        if(bigJump){ rp.x = ps.x; rp.y = ps.y; } // téléportation réelle (mort, reset, changement de niveau)
+        rp.baseX = ps.x; rp.baseVx = ps.vx || 0; rp.baseT = nowPerf;
+      }
+      // Position estimée en continu à partir de la vitesse connue, bornée pour éviter de dériver
+      // si un paquet se perd en route (on ne fige jamais plus de ~12 frames d'extrapolation pure).
+      const framesElapsed = Math.min((nowPerf - rp.baseT) / (1000/60), 12);
+      const targetX = rp.baseX + rp.baseVx * framesElapsed;
+      rp.x += (targetX - rp.x) * 0.5;
+      rp.y += (ps.y - rp.y) * 0.35;
       rp.facing = ps.facing; rp.vx = ps.vx; rp.onGround = ps.onGround;
       rp.crouch = ps.crouch; rp.inv = ps.inv; rp.charId = ps.charId; rp.slot = ps.slot;
     });
