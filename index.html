@@ -1709,12 +1709,14 @@ function randomRoomCode(){
 // Mesure la vraie latence (aller-retour) vers le serveur Firebase : on écrit une petite valeur
 // et on chronomètre le temps jusqu'à ce que l'écriture soit confirmée (ack) par le serveur.
 // C'est LA mesure fiable pour savoir si le problème vient réellement de Firebase/du réseau.
+let pingRequestSeq = 0; // évite qu'une mesure lente et périmée n'écrase une mesure plus récente/rapide
 function measureFirebasePing(){
   if(!onlineRoomRef) return;
+  const mySeq = ++pingRequestSeq;
   const t0 = performance.now();
   onlineRoomRef.child('diag/' + myId).set(firebase.database.ServerValue.TIMESTAMP)
-    .then(() => { lastPingMs = Math.round(performance.now() - t0); })
-    .catch(() => { lastPingMs = -1; });
+    .then(() => { if(mySeq === pingRequestSeq) lastPingMs = Math.round(performance.now() - t0); })
+    .catch(() => { if(mySeq === pingRequestSeq) lastPingMs = -1; });
 }
 setInterval(() => { if(onlineMode) measureFirebasePing(); }, 2000);
 
@@ -1869,6 +1871,17 @@ function joinOnlineRoom(code){
 
     onlinePresenceRef.set({ charId: currentCharacterId, slot: 99, joinedAt: Date.now(), name: playerName });
     onlinePresenceRef.onDisconnect().remove();
+
+    // Le tout premier événement 'value' de candidatePlayersRef a pu arriver AVANT que `joined`
+    // soit vrai (il était alors ignoré ci-dessus). On force donc une relecture immédiate pour être
+    // sûr d'avoir les métadonnées des autres joueurs dès l'entrée dans le salon.
+    candidatePlayersRef.once('value').then(snap2 => {
+      const val = snap2.val() || {};
+      const ids = Object.keys(val).sort((a,b) => (val[a].joinedAt||0) - (val[b].joinedAt||0)).slice(0, 4);
+      const newMeta = {};
+      ids.forEach((id, i) => { newMeta[id] = { charId: val[id].charId || 'zkr', slot: i, name: (val[id].name && String(val[id].name).slice(0,14)) || 'Joueur' }; });
+      onlineMeta = newMeta;
+    }).catch(() => {});
 
     document.getElementById('onlineLeaveBtn').style.display = '';
     onlineSetStatus(`Connecté au salon ${roomCode}. En attente de l'hôte...`);
@@ -2924,13 +2937,10 @@ function updateOnlineHost(){
       projectiles: projectiles.map(p => ({x: Math.round(p.x), y: Math.round(p.y), dir: p.dir, color: p.color, h: p.hostile ? 1 : 0})),
       score, lives: { ...onlinePlayerLives }, t: Date.now()
     };
-    // Le tableau des pièces ne change presque jamais d'une frame à l'autre : on ne le renvoie
-    // que s'il a réellement changé, au lieu de le sérialiser/transmettre ~12 fois par seconde.
-    const coinsTakenArr = level.coins.map(c => c.taken ? 1 : 0);
-    if(!lastSentCoinsTaken || coinsTakenArr.some((v,i) => v !== lastSentCoinsTaken[i])){
-      payload.coinsTaken = coinsTakenArr;
-      lastSentCoinsTaken = coinsTakenArr;
-    }
+    // IMPORTANT : onlineStateRef.set() remplace TOUT le nœud à chaque appel. On doit donc TOUJOURS
+    // inclure coinsTaken dans le payload, sinon il disparaît de Firebase dès qu'un envoi ne le
+    // contient pas, et les pièces déjà ramassées "réapparaissent" côté invité.
+    payload.coinsTaken = level.coins.map(c => c.taken ? 1 : 0);
     onlineStateRef.set(payload).catch(() => {});
   }
 }
@@ -3061,13 +3071,36 @@ function updateOnlineGuest(){
 }
 
 function gameLoop(){
+  // Filet de sécurité global : quoi qu'il arrive dans la frame (update OU dessin), on
+  // reprogramme toujours la frame suivante dans le `finally`. Avant ce correctif, la moindre
+  // exception non gérée arrêtait requestAnimationFrame pour de bon : le jeu se figeait
+  // complètement (HUD bloqué, joueurs figés donnant l'impression d'être invisibles/téléportés
+  // une fois la page rechargée).
+  try {
+    gameLoopBody();
+  } catch(err){
+    console.error('Erreur dans gameLoop (frame ignorée, boucle poursuivie) :', err);
+  } finally {
+    requestAnimationFrame(gameLoop);
+  }
+}
+
+function gameLoopBody(){
   frameTick++;
   const settingsAreOpen = settingsOverlay && !settingsOverlay.classList.contains('hidden');
   if(state === STATE_PLAYING && frameTick % 120 === 0 && !onlineMode) saveGame();
 
   if(onlineMode && !settingsAreOpen){
-    if(isHost) updateOnlineHost();
-    else updateOnlineGuest();
+    // Une exception ici ne doit JAMAIS interrompre la boucle de jeu (sinon tout se fige :
+    // HUD figé, joueurs figés/invisibles jusqu'au rechargement de la page). On isole donc
+    // la mise à jour réseau pour qu'un souci ponctuel (paquet incomplet, joueur qui vient
+    // de partir, etc.) ne casse qu'une frame au lieu de casser tout le jeu.
+    try {
+      if(isHost) updateOnlineHost();
+      else updateOnlineGuest();
+    } catch(err){
+      console.error('Erreur updateOnline (ignorée, boucle poursuivie) :', err);
+    }
   } else if(state === STATE_PLAYING && !settingsAreOpen){
     checkLifeRegen();
     const VIEW_W = coopMode ? WIDTH/2 : WIDTH;
@@ -3383,8 +3416,6 @@ function gameLoop(){
     ['Tu as fini le jeu !', false],
     ['ESPACE : nouvelle partie   |   M : carte des niveaux', false]
   ]);
-
-  requestAnimationFrame(gameLoop);
 }
 
 savedData = loadGame();
