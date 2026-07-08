@@ -1562,6 +1562,34 @@ function botTerrainHazard(p, dir){
   return { blocked: wallAhead || spikeAhead || enemyAhead || pitAhead, wallAhead, spikeAhead, enemyAhead, pitAhead };
 }
 
+// Repère la plateforme MOBILE qui doit normalement servir d'appui juste devant le joueur (dans le
+// sens de la marche), en se basant sur sa position DE BASE (baseX/baseY) plutôt que sa position
+// instantanée : une plateforme qui oscille reste "la prochaine étape prévue" même à l'instant où
+// elle n'est pas physiquement là. On ignore les plateformes trop éloignées en hauteur pour être
+// la suite logique du chemin (ça évite de viser une plateforme d'un tout autre étage du niveau).
+function botNextMovingPlatformAhead(p, dir){
+  let best = null, bestDist = Infinity;
+  (level.movingPlatforms || []).forEach(mp => {
+    const mpCx = mp.baseX + mp.w/2, mpCy = mp.baseY + mp.h/2;
+    const dx = mpCx - (p.x + p.w/2);
+    if(Math.sign(dx || dir) !== dir) return; // doit être devant nous, pas derrière
+    if(Math.abs(mpCy - (p.y + p.h/2)) > 260) return; // autre étage, pas la prochaine marche
+    const dist = Math.abs(dx);
+    if(dist < bestDist){ bestDist = dist; best = mp; }
+  });
+  return best;
+}
+
+// Cette plateforme mobile est-elle, À CET INSTANT PRÉCIS, assez proche pour qu'un saut normal
+// l'atteigne ? On compare sa position RÉELLE actuelle (pas sa base) à la position du joueur : c'est
+// ce test, réévalué chaque image, qui donne au bot le bon timing — il attend que la plateforme
+// revienne à portée avant de s'élancer, au lieu de sauter dans le vide en espérant qu'elle y soit.
+function botBridgeInReach(p, mp){
+  const dx = Math.abs((mp.x + mp.w/2) - (p.x + p.w/2));
+  const dy = Math.abs(mp.y - (p.y + p.h));
+  return dx <= BOT_JUMP_RANGE + 20 && dy <= 140;
+}
+
 // Esquive des projectiles hostiles qui se rapprochent : s'accroupir si le tir passe à une
 // hauteur que seule la position debout intercepte, sauter si même accroupi ça toucherait.
 // On réagit dès que possible (grande fenêtre de temps avant impact) plutôt que d'attendre
@@ -1733,7 +1761,22 @@ function computeAutoPilotControls(p){
   controls.left = !holding && goalDir < 0;
   controls.right = !holding && goalDir > 0;
   const hz = botTerrainHazard(p, goalDir);
-  if(p.onGround && hz.blocked) controls.jump = true;
+  if(p.onGround && hz.blocked){
+    // Un "trou" détecté devant peut en réalité être une plateforme MOBILE qui n'est simplement pas
+    // là à cet instant précis (elle va et vient). Dans ce cas il ne faut ni sauter dans le vide en
+    // espérant qu'elle y soit, ni avancer comme si c'était du sol classique : il faut attendre,
+    // pile au bord, qu'elle revienne à portée, puis sauter avec le bon timing.
+    if(hz.pitAhead && !hz.wallAhead && !hz.spikeAhead && !hz.enemyAhead){
+      const bridge = botNextMovingPlatformAhead(p, goalDir);
+      if(bridge && !botBridgeInReach(p, bridge)){
+        controls.left = false; controls.right = false; // on patiente sur place, en sécurité
+      } else {
+        controls.jump = true; // trou classique, ou plateforme mobile actuellement à portée
+      }
+    } else {
+      controls.jump = true; // mur, pic ou ennemi : franchissement immédiat comme avant
+    }
+  }
 
   // ---- 4) Esquiver les tirs hostiles (boss) sans se jeter dans un autre danger ----
   if(!controls.jump){
