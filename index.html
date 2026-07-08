@@ -2104,7 +2104,14 @@ function openCharacterSelect(fromPlay){
 
 function trySelectCharacter(){
   const c = CHARACTERS[charCursor];
-  if(c && c.isUnlocked()){ currentCharacterId = c.id; saveGame(); }
+  if(c && c.isUnlocked()){
+    currentCharacterId = c.id;
+    saveGame();
+    // Sans ça, changer de perso en cours de partie en ligne ne se voyait jamais chez les
+    // autres : la présence Firebase n'était écrite qu'une seule fois, à la création/connexion
+    // du salon.
+    if(onlineMode && onlinePresenceRef) onlinePresenceRef.update({ charId: currentCharacterId }).catch(() => {});
+  }
 }
 
 function tryShootFor(p, charDef){
@@ -2974,7 +2981,13 @@ function updateOnlineGuest(){
   }
   if(!remoteSnapshot) return;
   ensureOnlineLevel(remoteSnapshot.world, remoteSnapshot.level);
-  state = remoteSnapshot.state != null ? remoteSnapshot.state : STATE_PLAYING;
+  // Ne PAS écraser l'état local si le joueur a ouvert un menu local (sélection de personnage,
+  // carte) : sinon, dès qu'on appuie sur une touche pour ouvrir ce menu, la frame réseau
+  // suivante nous renvoie instantanément en jeu avant même que le menu s'affiche — c'est
+  // pour ça que l'écran de sélection de skin était inutilisable côté invité.
+  if(state !== STATE_CHARACTER && state !== STATE_MAP){
+    state = remoteSnapshot.state != null ? remoteSnapshot.state : STATE_PLAYING;
+  }
   score = remoteSnapshot.score || 0;
   lives = (remoteSnapshot.lives && remoteSnapshot.lives[myId] != null) ? remoteSnapshot.lives[myId] : 3;
 
