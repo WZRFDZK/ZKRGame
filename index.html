@@ -1575,6 +1575,29 @@ function botProjectileDodge(p){
   return { crouch, jump };
 }
 
+// Le joueur est-il, à cet instant précis, en contact avec un piège au sol ? Ce cas est plus urgent
+// que tout le reste (dégâts déjà en cours) : il faut décoller immédiatement, peu importe la direction.
+function botOnHazardNow(p){
+  const r = { x: p.x + 4, y: p.y, w: p.w - 8, h: p.h };
+  return level.spikes.some(s => r.x < s.x + s.w && r.x + r.w > s.x && r.y < s.y + s.h && r.y + r.h > s.y);
+}
+
+// Cherche la menace la plus proche (n'importe quel ennemi vivant, boss inclus) à peu près au même
+// niveau vertical, dans N'IMPORTE QUELLE direction — pour que le bot réagisse à tout ce qui l'entoure,
+// pas seulement à ce qui se trouve devant lui dans le sens de la marche.
+function botNearestThreat(p, maxDist){
+  let best = null, bestDist = Infinity, bestDir = 1;
+  const pcx = p.x + p.w/2;
+  enemies.forEach(e => {
+    if(!e.alive) return;
+    if(Math.abs((e.y + e.h/2) - (p.y + p.h/2)) > 60) return;
+    const ecx = e.x + e.w/2;
+    const dist = Math.abs(ecx - pcx);
+    if(dist <= maxDist && dist < bestDist){ bestDist = dist; best = e; bestDir = ecx >= pcx ? 1 : -1; }
+  });
+  return best ? { entity: best, dist: bestDist, dir: bestDir } : null;
+}
+
 function computeAutoPilotControls(p){
   const controls = {left:false,right:false,down:false,jump:false,shoot:false};
   if(!level || !p) return controls;
@@ -1582,6 +1605,13 @@ function computeAutoPilotControls(p){
   const goalX = (level.goalX != null) ? level.goalX : (p.x + 200);
   const goalDir = (p.x + p.w/2 < goalX) ? 1 : -1;
   const boss = enemies.find(e => e.isBoss && e.alive);
+
+  // ---- 0) Urgence absolue : on est EN TRAIN de se faire piquer par un piège -> décoller tout de suite.
+  if(p.onGround && botOnHazardNow(p)){
+    controls.jump = true;
+    controls.left = goalDir < 0; controls.right = goalDir > 0;
+    return controls;
+  }
 
   // ---- 1) Priorité absolue : esquiver une charge de boss (télégraphiée ou en cours) ----
   if(boss){
@@ -1620,15 +1650,28 @@ function computeAutoPilotControls(p){
     }
   }
 
-  // ---- 4) Riposter pour dégager la route (boss ou ennemi au sol face à lui) ----
-  if(boss && boss.attackState !== 'dash'){
+  // ---- 4) Vigilance à 360° : dès qu'un ennemi (ou le boss) est détecté à portée, on riposte.
+  // On scrute tout l'environnement, pas seulement ce qu'il y a devant dans le sens de la marche :
+  // un ennemi qui approche par-derrière compte tout autant qu'un ennemi devant.
+  const nearest = botNearestThreat(p, 340);
+  if(nearest && !controls.jump){
+    const { dir: threatDir, dist } = nearest;
+    const veryClose = dist < 70;
+    if(threatDir === goalDir){
+      // La menace est déjà dans le sens de la marche : on continue d'avancer en tirant devant soi.
+      controls.shoot = true;
+    } else if(veryClose){
+      // Elle est dans notre dos et sur le point de nous toucher : on se retourne une fraction de
+      // seconde pour l'abattre avant qu'elle ne morde, plutôt que de l'ignorer et prendre le coup.
+      controls.left = threatDir < 0; controls.right = threatDir > 0;
+      controls.shoot = true;
+    }
+    // Sinon (menace lointaine dans notre dos) : on continue simplement d'avancer vers l'objectif,
+    // ce qui l'éloigne déjà — pas besoin de rebrousser chemin pour une cible qui n'est pas pressante.
+  } else if(boss && !controls.jump){
     const bcx = boss.x + boss.w/2, pcx = p.x + p.w/2;
     const facingBoss = (bcx > pcx && goalDir > 0) || (bcx < pcx && goalDir < 0);
-    if(facingBoss && Math.abs(bcx - pcx) < 380) controls.shoot = (frameTick % 14 < 2);
-  } else if(!boss){
-    const target = enemies.find(e => e.alive && !e.isBoss &&
-      Math.sign((e.x - p.x) || 1) === goalDir && Math.abs(e.x - p.x) < 240 && Math.abs(e.y - p.y) < 50);
-    if(target && !hz.enemyAhead) controls.shoot = (frameTick % 16 < 2);
+    if(facingBoss && Math.abs(bcx - pcx) < 380) controls.shoot = true;
   }
 
   return controls;
