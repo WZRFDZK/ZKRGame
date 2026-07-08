@@ -212,6 +212,14 @@
         <input type="range" id="musicVolumeSlider" min="0" max="100" value="45">
       </div>
 
+      <div class="settingsRow" style="display:block;">
+        <label for="pseudoInput">Pseudo (affiché au-dessus de ton perso)</label>
+        <div style="display:flex; gap:8px; margin-top:6px;">
+          <input id="pseudoInput" maxlength="14" placeholder="Pseudo" style="flex:1; min-width:0; padding:8px; border-radius:8px; border:2px solid rgba(255,255,255,0.4); background:rgba(255,255,255,0.1); color:#fff; font-weight:bold; font-family:Arial, Helvetica, sans-serif;">
+          <button id="pseudoSaveBtn" class="keybindBtn" style="min-width:90px;">Valider</button>
+        </div>
+      </div>
+
       <div class="settingsRow" id="coopRow">
         <label for="coopToggle">Mode 2 joueurs (local, écran divisé)</label>
         <label class="switch">
@@ -882,6 +890,26 @@ function roundRectPath(x, y, w, h, r){
   ctx.arcTo(x, y+h, x, y, r);
   ctx.arcTo(x, y, x+w, y, r);
   ctx.closePath();
+}
+
+function drawNameTag(cx, topY, name){
+  if(!name) return;
+  ctx.save();
+  ctx.font = 'bold 12px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const text = String(name).slice(0, 14);
+  const padX = 7;
+  const textW = ctx.measureText(text).width;
+  const boxW = textW + padX*2;
+  const boxH = 17;
+  const boxY = topY - 12 - boxH;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  roundRectPath(cx - boxW/2, boxY, boxW, boxH, 6);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.fillText(text, cx, boxY + boxH/2 + 1);
+  ctx.restore();
 }
 
 function drawPlayerSprite(x, y, w, h, dir, vx, onGround, crouching, tick, charDef){
@@ -1948,15 +1976,15 @@ function createOnlineRoom(){
   onlinePresenceRef = onlinePlayersRef.child(myId);
 
   onlineRoomRef.child('meta').set({ hostId: myId, createdAt: Date.now() });
-  onlinePresenceRef.set({ charId: currentCharacterId, slot: 0, joinedAt: Date.now() });
+  onlinePresenceRef.set({ charId: currentCharacterId, slot: 0, joinedAt: Date.now(), name: playerName });
   onlinePresenceRef.onDisconnect().remove();
 
-  onlineMeta = { [myId]: { charId: currentCharacterId, slot: 0 } };
+  onlineMeta = { [myId]: { charId: currentCharacterId, slot: 0, name: playerName } };
   onlinePlayersRef.on('value', snap => {
     const val = snap.val() || {};
     const ids = Object.keys(val).sort((a,b) => (val[a].joinedAt||0) - (val[b].joinedAt||0)).slice(0, 4);
     const newMeta = {};
-    ids.forEach((id, i) => { newMeta[id] = { charId: val[id].charId || 'zkr', slot: i }; });
+    ids.forEach((id, i) => { newMeta[id] = { charId: val[id].charId || 'zkr', slot: i, name: (val[id].name && String(val[id].name).slice(0,14)) || 'Joueur' }; });
     onlineMeta = newMeta;
     Object.keys(onlineHostPlayers).forEach(id => { if(!newMeta[id]) delete onlineHostPlayers[id]; });
     onlineSetStatus(`Salon ${roomCode} — ${ids.length}/4 joueur(s) connecté(s). Partage ce code à tes amis !`);
@@ -1991,7 +2019,7 @@ function joinOnlineRoom(code){
     const val = snap2.val() || {};
     const ids = Object.keys(val).sort((a,b) => (val[a].joinedAt||0) - (val[b].joinedAt||0)).slice(0, 4);
     const newMeta = {};
-    ids.forEach((id, i) => { newMeta[id] = { charId: val[id].charId || 'zkr', slot: i }; });
+    ids.forEach((id, i) => { newMeta[id] = { charId: val[id].charId || 'zkr', slot: i, name: (val[id].name && String(val[id].name).slice(0,14)) || 'Joueur' }; });
     onlineMeta = newMeta;
   });
   candidateStateRef.on('value', snap2 => {
@@ -2013,7 +2041,7 @@ function joinOnlineRoom(code){
     onlinePlayersRef = candidatePlayersRef;
     onlinePresenceRef = candidatePresenceRef;
 
-    onlinePresenceRef.set({ charId: currentCharacterId, slot: 99, joinedAt: Date.now() });
+    onlinePresenceRef.set({ charId: currentCharacterId, slot: 99, joinedAt: Date.now(), name: playerName });
     onlinePresenceRef.onDisconnect().remove();
 
     document.getElementById('onlineLeaveBtn').style.display = '';
@@ -2046,6 +2074,11 @@ let isMobile = false;
 let currentCharacterId = 'zkr';
 let charCursor = 0;
 
+function randomDefaultName(){
+  return 'Joueur' + Math.floor(1000 + Math.random()*9000);
+}
+let playerName = randomDefaultName();
+
 let totalCoinsAllTime = 0;
 let bossesDefeated = 0;
 let worldsCompletedCount = 0;
@@ -2073,7 +2106,7 @@ function saveGame(){
     const data = {
       worldIndex, levelIndex, lives, score,
       unlockedFlat, checkpointWorld, checkpointScore,
-      currentCharacterId, isMobile,
+      currentCharacterId, isMobile, playerName,
       musicEnabled, musicVolume, KEYBINDS, coopMode,
       totalCoinsAllTime, bossesDefeated, worldsCompletedCount, victoriesCount,
       enemiesDefeatedAllTime, perfectLevelsCount, flawlessWorldsCount, livesLostThisWorld,
@@ -2101,6 +2134,7 @@ function applySavedData(d){
   checkpointWorld = d.checkpointWorld ?? 0;
   checkpointScore = d.checkpointScore ?? 0;
   currentCharacterId = d.currentCharacterId ?? 'zkr';
+  playerName = (d.playerName && String(d.playerName).trim()) ? String(d.playerName).slice(0,14) : playerName;
   musicEnabled = d.musicEnabled ?? true;
   musicVolume = d.musicVolume ?? 0.45;
   if(d.KEYBINDS) KEYBINDS = { ...DEFAULT_KEYBINDS, ...d.KEYBINDS };
@@ -2311,6 +2345,8 @@ const coopToggle = document.getElementById('coopToggle');
 const coopRow = document.getElementById('coopRow');
 const coopHint = document.getElementById('coopHint');
 const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+const pseudoInput = document.getElementById('pseudoInput');
+const pseudoSaveBtn = document.getElementById('pseudoSaveBtn');
 const changeDeviceBtn = document.getElementById('changeDeviceBtn');
 const keybindSection = document.getElementById('keybindSection');
 const keybindButtons = Array.from(document.querySelectorAll('.keybindBtn'));
@@ -2320,6 +2356,7 @@ let rebindingAction = null;
 function syncSettingsUI(){
   musicToggle.checked = musicEnabled;
   musicVolumeSlider.value = Math.round(musicVolume * 100);
+  pseudoInput.value = playerName;
   keybindButtons.forEach(btn => {
     const action = btn.dataset.action;
     btn.textContent = keyDisplayName(KEYBINDS[action]);
@@ -2364,6 +2401,20 @@ coopToggle.addEventListener('change', () => {
     cameraX2 = cameraX;
   }
   saveGame();
+});
+
+function applyPseudo(){
+  const val = pseudoInput.value.trim().slice(0, 14);
+  playerName = val || randomDefaultName();
+  pseudoInput.value = playerName;
+  saveGame();
+  if(onlineMode && onlinePresenceRef){
+    onlinePresenceRef.update({ name: playerName }).catch(() => {});
+  }
+}
+pseudoSaveBtn.addEventListener('click', applyPseudo);
+pseudoInput.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ applyPseudo(); canvas.focus(); }
 });
 
 document.getElementById('onlineCreateBtn').addEventListener('click', () => {
@@ -2883,7 +2934,7 @@ function updateOnlineHost(){
   if(state !== STATE_PLAYING) return;
   level.movingPlatforms.forEach(mp => mp.update(frameTick));
 
-  if(!onlineMeta[myId]) onlineMeta[myId] = { charId: currentCharacterId, slot: 0 };
+  if(!onlineMeta[myId]) onlineMeta[myId] = { charId: currentCharacterId, slot: 0, name: playerName };
   const ids = Object.keys(onlineMeta);
   ids.forEach(id => ensureHostPlayer(id));
   Object.keys(onlineHostPlayers).forEach(id => { if(!onlineMeta[id]){ delete onlineHostPlayers[id]; delete hostLastActiveTime[id]; delete hostBotActive[id]; } });
@@ -3335,22 +3386,24 @@ function gameLoop(){
         if(isHost){
           Object.keys(onlineHostPlayers).forEach(id => {
             const p = onlineHostPlayers[id];
-            const meta = onlineMeta[id] || {charId:'zkr', slot:0};
+            const meta = onlineMeta[id] || {charId:'zkr', slot:0, name:'Joueur'};
             const charDef = getCharacterTinted(meta.charId, ONLINE_TINTS[meta.slot % ONLINE_TINTS.length]);
             if(p.invincibleTimer <= 0 || p.invincibleTimer % 8 < 5){
               drawPlayerSprite(p.x - camX, p.y, p.w, p.h, p.facing, p.vx, p.onGround, p.h === PLAYER_CROUCH_HEIGHT, frameTick, charDef);
             }
+            drawNameTag(p.x - camX + p.w/2, p.y, meta.name || 'Joueur');
           });
         } else if(remoteSnapshot && remoteSnapshot.players){
           Object.keys(remoteSnapshot.players).forEach(id => {
             if(id === myId && myPredPlayer){
               // Son propre personnage : dessiné depuis la simulation locale (60 fps, réactive),
               // pas depuis le dernier paquet réseau reçu.
-              const meta = onlineMeta[myId] || {charId: currentCharacterId, slot: 0};
+              const meta = onlineMeta[myId] || {charId: currentCharacterId, slot: 0, name: playerName};
               const charDef = getCharacterTinted(meta.charId || currentCharacterId, ONLINE_TINTS[meta.slot % ONLINE_TINTS.length]);
               if(myPredPlayer.invincibleTimer <= 0 || myPredPlayer.invincibleTimer % 8 < 5){
                 drawPlayerSprite(myPredPlayer.x - camX, myPredPlayer.y, myPredPlayer.w, myPredPlayer.h, myPredPlayer.facing, myPredPlayer.vx, myPredPlayer.onGround, myPredPlayer.h === PLAYER_CROUCH_HEIGHT, frameTick, charDef);
               }
+              drawNameTag(myPredPlayer.x - camX + myPredPlayer.w/2, myPredPlayer.y, meta.name || playerName);
               return;
             }
             const ps = renderPlayers[id] || remoteSnapshot.players[id];
@@ -3358,16 +3411,19 @@ function gameLoop(){
             if(!ps.inv || frameTick % 8 < 5){
               drawPlayerSprite(ps.x - camX, ps.y, PLAYER_WIDTH, ps.crouch ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT, ps.facing, ps.vx, ps.onGround, ps.crouch, frameTick, charDef);
             }
+            const psName = (onlineMeta[id] && onlineMeta[id].name) || 'Joueur';
+            drawNameTag(ps.x - camX + PLAYER_WIDTH/2, ps.y, psName);
           });
         }
       } else {
         const drawables = coopMode
-          ? [{p: player, char: getCharacter(currentCharacterId)}, {p: player2, char: getCharacterP2()}]
-          : [{p: player, char: getCharacter(currentCharacterId)}];
-        drawables.forEach(({p, char}) => {
+          ? [{p: player, char: getCharacter(currentCharacterId), name: playerName}, {p: player2, char: getCharacterP2(), name: 'Joueur 2'}]
+          : [{p: player, char: getCharacter(currentCharacterId), name: playerName}];
+        drawables.forEach(({p, char, name}) => {
           if(p.invincibleTimer <= 0 || p.invincibleTimer % 8 < 5){
             drawPlayerSprite(p.x - camX, p.y, p.w, p.h, p.facing, p.vx, p.onGround, p.h === PLAYER_CROUCH_HEIGHT, frameTick, char);
           }
+          drawNameTag(p.x - camX + p.w/2, p.y, name);
         });
       }
 
