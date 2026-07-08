@@ -1535,26 +1535,37 @@ function botGroundEdgeDist(p, dir, maxDist){
   return Infinity;
 }
 
-// Détecte tous les obstacles de terrain (mur, pics, ennemi, trou) dans une direction donnée.
+// Marge de sécurité utilisée pour TOUTE détection d'obstacle : le bot ne doit jamais réagir au
+// tout dernier pixel avec un timing serré. On regarde volontairement plus loin devant soi et on
+// déclenche le saut avec une bonne marge de confort, quitte à sauter un peu "en avance" plutôt
+// que de couper au plus juste.
+const BOT_SAFE_MARGIN = 60;
+
+// Détecte tous les obstacles de terrain (mur, pics, ennemi, trou) dans une direction donnée, avec
+// une marge confortable pour anticiper la suite des événements plutôt que réagir au dernier moment.
 function botTerrainHazard(p, dir){
   const chestY = p.y + p.h * 0.45;
   const feetY = p.y + p.h + 6;
-  const nearX = p.x + (dir > 0 ? p.w + 32 : -32);
+  const nearX = p.x + (dir > 0 ? p.w + BOT_SAFE_MARGIN : -BOT_SAFE_MARGIN);
 
   const wallAhead = level.solids.some(s => !s.oneWay &&
     nearX > s.x && nearX < s.x + s.w && chestY > s.y && chestY < s.y + s.h);
   const spikeAhead = level.spikes.some(s =>
-    nearX > s.x - 14 && nearX < s.x + s.w + 14 && Math.abs(s.y - feetY) < 48);
+    nearX > s.x - 22 && nearX < s.x + s.w + 22 && Math.abs(s.y - feetY) < 48);
   const enemyAhead = enemies.some(e => e.alive && !e.isBoss &&
-    Math.sign((e.x - p.x) || 1) === dir && Math.abs(e.x - p.x) < 58 && Math.abs(e.y - p.y) < 42);
+    Math.sign((e.x - p.x) || 1) === dir && Math.abs(e.x - p.x) < 95 && Math.abs(e.y - p.y) < 42);
+  // On saute bien avant d'atteindre le bord réel du trou (grosse marge), pour ne jamais s'élancer
+  // au ras du vide : mieux vaut un saut légèrement anticipé qu'un timing serré risqué.
   const edgeDist = botGroundEdgeDist(p, dir, BOT_JUMP_RANGE + 30);
-  const pitAhead = edgeDist <= 46;
+  const pitAhead = edgeDist <= 85;
 
   return { blocked: wallAhead || spikeAhead || enemyAhead || pitAhead, wallAhead, spikeAhead, enemyAhead, pitAhead };
 }
 
 // Esquive des projectiles hostiles qui se rapprochent : s'accroupir si le tir passe à une
 // hauteur que seule la position debout intercepte, sauter si même accroupi ça toucherait.
+// On réagit dès que possible (grande fenêtre de temps avant impact) plutôt que d'attendre
+// que le tir soit tout proche, pour un mouvement d'esquive posé et non précipité.
 function botProjectileDodge(p){
   let crouch = false, jump = false;
   for(const pr of projectiles){
@@ -1563,9 +1574,9 @@ function botProjectileDodge(p){
     const closing = (pr.vx > 0 && dx < 0) || (pr.vx < 0 && dx > 0);
     if(!closing) continue;
     const dist = Math.abs(dx);
-    if(dist > 240) continue;
+    if(dist > 280) continue;
     const framesToImpact = dist / Math.max(1, Math.abs(pr.vx));
-    if(framesToImpact > 28) continue; // trop tôt pour réagir utilement, on réévaluera plus près
+    if(framesToImpact > 40) continue; // trop tôt pour réagir utilement, on réévaluera plus près
     const crouchTopY = p.y + (p.h - PLAYER_CROUCH_HEIGHT);
     const hitsStanding = pr.y + pr.h > p.y && pr.y < p.y + p.h;
     const hitsCrouched = pr.y + pr.h > crouchTopY && pr.y < p.y + p.h;
@@ -1617,7 +1628,7 @@ function computeAutoPilotControls(p){
   if(boss){
     const sameLane = Math.abs(boss.y - p.y) < 60;
     const bcx = boss.x + boss.w/2, pcx = p.x + p.w/2;
-    const closeToBoss = Math.abs(bcx - pcx) < 260;
+    const closeToBoss = Math.abs(bcx - pcx) < 320; // marge large : on recule tôt, sans attendre d'être collé
     if(sameLane && closeToBoss && boss.attackState === 'telegraph' && boss.attackKind === 'dash'){
       // Le boss va charger : on recule hors de sa trajectoire (en évitant de reculer dans un mur/trou).
       const away = pcx < bcx ? -1 : 1;
