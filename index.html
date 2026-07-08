@@ -1651,6 +1651,7 @@ let onlineHostPlayers = {};
 let remoteSnapshot = null;
 let renderPlayers = {}; // positions lissées (invité) pour les AUTRES joueurs (pas de prédiction possible, on n'a pas leurs touches)
 let lastRemoteSnapshotT = null; // sert à détecter précisément l'arrivée d'un NOUVEAU paquet réseau (vs la même donnée relue plusieurs frames de suite)
+const DEBUG_SHOW_COORDS = true; // affiche la coordonnée X monde réelle de chaque joueur sous son pseudo, en ligne — utile pour vérifier objectivement la synchro entre plusieurs fenêtres (à repasser à false une fois les tests terminés)
 let myPredPlayer = null; // instance Player simulée localement à 60 fps chez l'invité, pour SON PROPRE personnage (prédiction côté client)
 let lastKnownLives = null; // sert à détecter une perte de vie (dégâts/mort) pour recaler le perso prédit, sans comparer de positions
 let onlineWorld = 0, onlineLevel = 0;
@@ -3274,7 +3275,7 @@ function gameLoop(){
             if(p.invincibleTimer <= 0 || p.invincibleTimer % 8 < 5){
               drawPlayerSprite(p.x - camX, p.y, p.w, p.h, p.facing, p.vx, p.onGround, p.h === PLAYER_CROUCH_HEIGHT, frameTick, charDef);
             }
-            drawNameTag(p.x - camX + p.w/2, p.y, meta.name || 'Joueur');
+            drawNameTag(p.x - camX + p.w/2, p.y, DEBUG_SHOW_COORDS ? `${meta.name || 'Joueur'} [x:${Math.round(p.x)}]` : (meta.name || 'Joueur'));
           });
         } else if(remoteSnapshot && remoteSnapshot.players){
           Object.keys(remoteSnapshot.players).forEach(id => {
@@ -3287,7 +3288,7 @@ function gameLoop(){
               if(myPredPlayer.invincibleTimer <= 0 || myPredPlayer.invincibleTimer % 8 < 5){
                 drawPlayerSprite(myPredPlayer.x - camX, myPredPlayer.y, myPredPlayer.w, myPredPlayer.h, myPredPlayer.facing, myPredPlayer.vx, myPredPlayer.onGround, myPredPlayer.h === PLAYER_CROUCH_HEIGHT, frameTick, charDef);
               }
-              drawNameTag(myPredPlayer.x - camX + myPredPlayer.w/2, myPredPlayer.y, meta.name || playerName);
+              drawNameTag(myPredPlayer.x - camX + myPredPlayer.w/2, myPredPlayer.y, DEBUG_SHOW_COORDS ? `${meta.name || playerName} [x:${Math.round(myPredPlayer.x)}]` : (meta.name || playerName));
               return;
             }
             const ps = renderPlayers[id] || remoteSnapshot.players[id];
@@ -3296,7 +3297,7 @@ function gameLoop(){
               drawPlayerSprite(ps.x - camX, ps.y, PLAYER_WIDTH, ps.crouch ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT, ps.facing, ps.vx, ps.onGround, ps.crouch, frameTick, charDef);
             }
             const psName = (onlineMeta[id] && onlineMeta[id].name) || 'Joueur';
-            drawNameTag(ps.x - camX + PLAYER_WIDTH/2, ps.y, psName);
+            drawNameTag(ps.x - camX + PLAYER_WIDTH/2, ps.y, DEBUG_SHOW_COORDS ? `${psName} [x:${Math.round(ps.x)}]` : psName);
           });
         }
       } else {
