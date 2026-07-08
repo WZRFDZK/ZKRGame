@@ -1599,338 +1599,10 @@ function rawControlsP1(){
   };
 }
 
-// ===================== BOT D'INACTIVITÉ (multijoueur en ligne) =====================
-// Si un joueur reste inactif 10 secondes en pleine partie en ligne, un pilote automatique
-// prend le relais et fait avancer son personnage vers l'objectif. Ce pilote est conçu pour
-// éviter toute mort évitable : trous, murs, pics, ennemis, tirs hostiles et charges de boss,
-// tout en restant fluide (décisions basées sur la vraie physique du saut, pas de tremblements).
-const BOT_IDLE_MS = 10000;
-let lastInputTime = Date.now();
-let botTakeoverActive = false;
-
-function resetBotIdleTimer(){ lastInputTime = Date.now(); botTakeoverActive = false; }
-
-// Portée horizontale d'un saut à vitesse de course, calculée avec la vraie physique du jeu
-// (temps en l'air = 2*|JUMP_VELOCITY|/GRAVITY). Sert à savoir si un trou est franchissable
-// et à déclencher le saut ni trop tôt ni trop tard.
-const BOT_JUMP_AIR_TIME = (2 * Math.abs(JUMP_VELOCITY)) / GRAVITY;
-const BOT_JUMP_RANGE = MOVE_SPEED * BOT_JUMP_AIR_TIME;
-
-// Distance jusqu'au bord du vide devant le joueur, dans une direction donnée
-// (scan progressif du sol sous les pieds ; Infinity si le sol continue au-delà de maxDist).
-function botGroundEdgeDist(p, dir, maxDist){
-  const feetY = p.y + p.h + 4;
-  for(let d = 12; d <= maxDist; d += 8){
-    const sx = p.x + p.w/2 + dir*d;
-    const hasGround = level.solids.some(s => sx > s.x && sx < s.x + s.w && Math.abs(s.y - feetY) < 55);
-    if(!hasGround) return d;
-  }
-  return Infinity;
-}
-
-// Marge de sécurité utilisée pour TOUTE détection d'obstacle : le bot ne doit jamais réagir au
-// tout dernier pixel avec un timing serré. On regarde volontairement plus loin devant soi et on
-// déclenche le saut avec une bonne marge de confort, quitte à sauter un peu "en avance" plutôt
-// que de couper au plus juste.
-const BOT_SAFE_MARGIN = 60;
-
-// Détecte tous les obstacles de terrain (mur, pics, ennemi, trou) dans une direction donnée, avec
-// une marge confortable pour anticiper la suite des événements plutôt que réagir au dernier moment.
-function botTerrainHazard(p, dir){
-  const chestY = p.y + p.h * 0.45;
-  const feetY = p.y + p.h + 6;
-  const nearX = p.x + (dir > 0 ? p.w + BOT_SAFE_MARGIN : -BOT_SAFE_MARGIN);
-
-  const wallAhead = level.solids.some(s => !s.oneWay &&
-    nearX > s.x && nearX < s.x + s.w && chestY > s.y && chestY < s.y + s.h);
-  const spikeAhead = level.spikes.some(s =>
-    nearX > s.x - 22 && nearX < s.x + s.w + 22 && Math.abs(s.y - feetY) < 48);
-  const enemyAhead = enemies.some(e => e.alive && !e.isBoss &&
-    Math.sign((e.x - p.x) || 1) === dir && Math.abs(e.x - p.x) < 95 && Math.abs(e.y - p.y) < 42);
-  // On saute bien avant d'atteindre le bord réel du trou (grosse marge), pour ne jamais s'élancer
-  // au ras du vide : mieux vaut un saut légèrement anticipé qu'un timing serré risqué.
-  const edgeDist = botGroundEdgeDist(p, dir, BOT_JUMP_RANGE + 30);
-  const pitAhead = edgeDist <= 85;
-
-  return { blocked: wallAhead || spikeAhead || enemyAhead || pitAhead, wallAhead, spikeAhead, enemyAhead, pitAhead };
-}
-
-// Repère la plateforme MOBILE qui doit normalement servir d'appui juste devant le joueur (dans le
-// sens de la marche), en se basant sur sa position DE BASE (baseX/baseY) plutôt que sa position
-// instantanée : une plateforme qui oscille reste "la prochaine étape prévue" même à l'instant où
-// elle n'est pas physiquement là. On ignore les plateformes trop éloignées en hauteur pour être
-// la suite logique du chemin (ça évite de viser une plateforme d'un tout autre étage du niveau).
-function botNextMovingPlatformAhead(p, dir){
-  let best = null, bestDist = Infinity;
-  (level.movingPlatforms || []).forEach(mp => {
-    const mpCx = mp.baseX + mp.w/2, mpCy = mp.baseY + mp.h/2;
-    const dx = mpCx - (p.x + p.w/2);
-    if(Math.sign(dx || dir) !== dir) return; // doit être devant nous, pas derrière
-    if(Math.abs(mpCy - (p.y + p.h/2)) > 260) return; // autre étage, pas la prochaine marche
-    const dist = Math.abs(dx);
-    if(dist < bestDist){ bestDist = dist; best = mp; }
-  });
-  return best;
-}
-
-// Cette plateforme mobile est-elle, À CET INSTANT PRÉCIS, assez proche pour qu'un saut normal
-// l'atteigne ? On compare sa position RÉELLE actuelle (pas sa base) à la position du joueur : c'est
-// ce test, réévalué chaque image, qui donne au bot le bon timing — il attend que la plateforme
-// revienne à portée avant de s'élancer, au lieu de sauter dans le vide en espérant qu'elle y soit.
-function botBridgeInReach(p, mp){
-  const dx = Math.abs((mp.x + mp.w/2) - (p.x + p.w/2));
-  const dy = Math.abs(mp.y - (p.y + p.h));
-  return dx <= BOT_JUMP_RANGE + 20 && dy <= 140;
-}
-
-// Esquive des projectiles hostiles qui se rapprochent : s'accroupir si le tir passe à une
-// hauteur que seule la position debout intercepte, sauter si même accroupi ça toucherait.
-// On réagit dès que possible (grande fenêtre de temps avant impact) plutôt que d'attendre
-// que le tir soit tout proche, pour un mouvement d'esquive posé et non précipité.
-function botProjectileDodge(p){
-  let crouch = false, jump = false;
-  for(const pr of projectiles){
-    if(pr.dead || !pr.hostile) continue;
-    const dx = (pr.x + pr.w/2) - (p.x + p.w/2);
-    const closing = (pr.vx > 0 && dx < 0) || (pr.vx < 0 && dx > 0);
-    if(!closing) continue;
-    const dist = Math.abs(dx);
-    if(dist > 280) continue;
-    const framesToImpact = dist / Math.max(1, Math.abs(pr.vx));
-    if(framesToImpact > 40) continue; // trop tôt pour réagir utilement, on réévaluera plus près
-    const crouchTopY = p.y + (p.h - PLAYER_CROUCH_HEIGHT);
-    const hitsStanding = pr.y + pr.h > p.y && pr.y < p.y + p.h;
-    const hitsCrouched = pr.y + pr.h > crouchTopY && pr.y < p.y + p.h;
-    if(hitsStanding && !hitsCrouched) crouch = true;
-    else if(hitsStanding && hitsCrouched) jump = true;
-  }
-  return { crouch, jump };
-}
-
-// Le joueur est-il, à cet instant précis, en contact avec un piège au sol ? Ce cas est plus urgent
-// que tout le reste (dégâts déjà en cours) : il faut décoller immédiatement, peu importe la direction.
-function botOnHazardNow(p){
-  const r = { x: p.x + 4, y: p.y, w: p.w - 8, h: p.h };
-  return level.spikes.some(s => r.x < s.x + s.w && r.x + r.w > s.x && r.y < s.y + s.h && r.y + r.h > s.y);
-}
-
-// Mémoire persistante du bot, attachée directement à l'instance Player pilotée : chaque joueur
-// (l'hôte lui-même, ou chaque invité idle piloté par l'hôte) a donc naturellement sa propre mémoire,
-// sans jamais se mélanger avec celle d'un autre joueur.
-function botMemory(p){
-  if(!p.__bot) p.__bot = { holdUntil: 0, knownEnemies: new Map(), lastSolid: null };
-  return p.__bot;
-}
-
-// "Écran visible" pour CE joueur : on reproduit la même formule que la vraie caméra du jeu
-// (centrée à WIDTH/3 devant lui, bornée aux limites du niveau) pour savoir ce qu'il aurait
-// réellement sous les yeux — et donc scruter TOUTE la partie visible, pas juste ses abords immédiats.
-function botVisibleBounds(p){
-  const left = Math.max(0, Math.min(p.x - WIDTH/3, Math.max(0, level.width - WIDTH)));
-  return { left, right: left + WIDTH };
-}
-
-// Anticipe la position d'un ennemi patrouilleur dans `frames` images, rebonds sur ses bornes de
-// patrouille compris — pour ne jamais être surpris par un ennemi qui aura fait demi-tour d'ici là.
-// (Le boss a sa propre IA à états, déjà traitée séparément via attackState/attackKind.)
-function botPredictEnemyX(e, frames){
-  if(e.isBoss) return e.x + e.w/2;
-  let x = e.x, dir = e.dir;
-  for(let i = 0; i < frames; i++){
-    x += e.speed * dir;
-    if(x < e.left){ x = e.left; dir = 1; }
-    else if(x + e.w > e.right){ x = e.right - e.w; dir = -1; }
-  }
-  return x + e.w/2;
-}
-
-// Détecte qu'un ennemi observé (visible à l'écran) vient de mourir depuis la dernière image :
-// déclenche une pause de sécurité avant de reprendre la route, plutôt que de foncer tête baissée.
-function botDetectKill(p){
-  const mem = botMemory(p);
-  const bounds = botVisibleBounds(p);
-  let justKilled = false;
-  enemies.forEach(e => {
-    const visible = (e.x + e.w) > bounds.left && e.x < bounds.right;
-    if(visible){
-      if(mem.knownEnemies.get(e) === true && !e.alive) justKilled = true;
-      mem.knownEnemies.set(e, e.alive);
-    } else {
-      mem.knownEnemies.delete(e);
-    }
-  });
-  return justKilled;
-}
-
-// Le solide (sol/plateforme) actuellement sous les pieds du joueur, ou null s'il est en l'air.
-function botCurrentSolid(p){
-  if(!p.onGround) return null;
-  const feetY = p.y + p.h + 3;
-  const cx = p.x + p.w/2;
-  return level.solids.find(s => cx > s.x && cx < s.x + s.w && Math.abs(s.y - feetY) < 8) || null;
-}
-
-// Cherche la menace la plus proche (n'importe quel ennemi vivant, boss inclus) à peu près au même
-// niveau vertical, N'IMPORTE OÙ dans la partie visible de l'écran — pas seulement devant lui dans
-// le sens de la marche — en se basant sur sa position ANTICIPÉE (pas seulement actuelle).
-function botNearestThreat(p){
-  const bounds = botVisibleBounds(p);
-  let best = null, bestDist = Infinity, bestDir = 1;
-  const pcx = p.x + p.w/2;
-  enemies.forEach(e => {
-    if(!e.alive) return;
-    if((e.x + e.w) < bounds.left || e.x > bounds.right) return; // hors du champ de vision
-    if(Math.abs((e.y + e.h/2) - (p.y + p.h/2)) > 60) return;
-    const predictedCx = botPredictEnemyX(e, 12); // ~0.2s d'anticipation sur son déplacement
-    const dist = Math.abs(predictedCx - pcx);
-    if(dist < bestDist){ bestDist = dist; best = e; bestDir = predictedCx >= pcx ? 1 : -1; }
-  });
-  return best ? { entity: best, dist: bestDist, dir: bestDir } : null;
-}
-
-// Estime si un tir toucherait la cible en restant DEBOUT, et/ou en s'ACCROUPISSANT (la ligne de
-// tir descend quand on est accroupi, car les pieds ne bougent pas mais la tête se baisse).
-function botShotWouldConnect(p, target){
-  const standOriginY = p.y + p.h * 0.42;
-  const crouchTopY = p.y + (p.h - PLAYER_CROUCH_HEIGHT);
-  const crouchOriginY = crouchTopY + PLAYER_CROUCH_HEIGHT * 0.42;
-  const top = target.y - 6, bottom = target.y + target.h + 6;
-  return {
-    standing: standOriginY > top && standOriginY < bottom,
-    crouched: crouchOriginY > top && crouchOriginY < bottom
-  };
-}
-
-function computeAutoPilotControls(p){
-  const controls = {left:false,right:false,down:false,jump:false,shoot:false};
-  if(!level || !p) return controls;
-
-  const mem = botMemory(p);
-  const goalX = (level.goalX != null) ? level.goalX : (p.x + 200);
-  const goalDir = (p.x + p.w/2 < goalX) ? 1 : -1;
-  const boss = enemies.find(e => e.isBoss && e.alive);
-
-  // ---- 0) Urgence absolue : on est EN TRAIN de se faire piquer par un piège -> décoller tout de suite.
-  if(p.onGround && botOnHazardNow(p)){
-    controls.jump = true;
-    controls.left = goalDir < 0; controls.right = goalDir > 0;
-    return controls;
-  }
-
-  // ---- 1) Priorité absolue : esquiver une charge de boss (télégraphiée ou en cours) ----
-  if(boss){
-    const sameLane = Math.abs(boss.y - p.y) < 60;
-    const bcx = boss.x + boss.w/2, pcx = p.x + p.w/2;
-    const closeToBoss = Math.abs(bcx - pcx) < 320; // marge large : on recule tôt, sans attendre d'être collé
-    if(sameLane && closeToBoss && boss.attackState === 'telegraph' && boss.attackKind === 'dash'){
-      // Le boss va charger : on recule hors de sa trajectoire (en évitant de reculer dans un mur/trou).
-      const away = pcx < bcx ? -1 : 1;
-      const hzAway = botTerrainHazard(p, away);
-      controls.left = away < 0 && !hzAway.blocked;
-      controls.right = away > 0 && !hzAway.blocked;
-      if(hzAway.blocked && p.onGround) controls.jump = true;
-      return controls;
-    }
-    if(sameLane && Math.abs(bcx - pcx) < 100 && boss.attackState === 'dash'){
-      // Trop tard pour reculer : sauter par-dessus la charge est plus fiable qu'esquiver au sol.
-      controls.jump = p.onGround;
-      controls.left = goalDir < 0; controls.right = goalDir > 0;
-      return controls;
-    }
-  }
-
-  // ---- 2) Pause de sécurité : on vient de tuer un ennemi observé, ou d'atteindre une nouvelle
-  // plateforme/tronçon de sol -> on s'arrête un court instant pour évaluer les environs avant de
-  // repartir, plutôt que de foncer sans réfléchir. La sécurité prime toujours sur la vitesse.
-  if(botDetectKill(p) && p.onGround) mem.holdUntil = frameTick + 45;
-  const curSolid = botCurrentSolid(p);
-  if(curSolid && mem.lastSolid && curSolid !== mem.lastSolid) mem.holdUntil = Math.max(mem.holdUntil, frameTick + 30);
-  if(curSolid) mem.lastSolid = curSolid;
-  const holding = frameTick < mem.holdUntil;
-
-  // ---- 3) Avancer vers l'objectif (sauf pause de sécurité en cours) en franchissant murs, pics,
-  // ennemis et trous — la marche s'arrête net dès qu'un franchissement est nécessaire ou qu'on
-  // observe une pause, mais le saut de sécurité reste toujours actif même à l'arrêt.
-  controls.left = !holding && goalDir < 0;
-  controls.right = !holding && goalDir > 0;
-  const hz = botTerrainHazard(p, goalDir);
-  if(p.onGround && hz.blocked){
-    // Un "trou" détecté devant peut en réalité être une plateforme MOBILE qui n'est simplement pas
-    // là à cet instant précis (elle va et vient). Dans ce cas il ne faut ni sauter dans le vide en
-    // espérant qu'elle y soit, ni avancer comme si c'était du sol classique : il faut attendre,
-    // pile au bord, qu'elle revienne à portée, puis sauter avec le bon timing.
-    if(hz.pitAhead && !hz.wallAhead && !hz.spikeAhead && !hz.enemyAhead){
-      const bridge = botNextMovingPlatformAhead(p, goalDir);
-      if(bridge && !botBridgeInReach(p, bridge)){
-        controls.left = false; controls.right = false; // on patiente sur place, en sécurité
-      } else {
-        controls.jump = true; // trou classique, ou plateforme mobile actuellement à portée
-      }
-    } else {
-      controls.jump = true; // mur, pic ou ennemi : franchissement immédiat comme avant
-    }
-  }
-
-  // ---- 4) Esquiver les tirs hostiles (boss) sans se jeter dans un autre danger ----
-  if(!controls.jump){
-    const dodge = botProjectileDodge(p);
-    if(dodge.jump && p.onGround) controls.jump = true;
-    else if(dodge.crouch && p.onGround && !hz.pitAhead){
-      controls.down = true; controls.left = false; controls.right = false;
-    }
-  }
-
-  // ---- 5) Vigilance sur toute la partie visible de l'écran : dès qu'un ennemi (ou le boss) est
-  // repéré, même loin ou dans le dos, on riposte — en anticipant son déplacement et en choisissant
-  // de s'accroupir si ça suffit à toucher, plutôt que de rester debout bêtement.
-  const nearest = botNearestThreat(p);
-  if(nearest && !controls.jump){
-    const { entity: target, dir: threatDir, dist } = nearest;
-    const veryClose = dist < 70;
-    const shotFit = botShotWouldConnect(p, target);
-    if(threatDir === goalDir || veryClose){
-      if(veryClose && threatDir !== goalDir){
-        // Menace dans le dos, sur le point de mordre : on se retourne pour l'abattre avant qu'elle
-        // ne nous touche, plutôt que de l'ignorer et encaisser le coup.
-        controls.left = threatDir < 0; controls.right = threatDir > 0;
-      }
-      if(!shotFit.standing && shotFit.crouched && p.onGround && !hz.pitAhead){
-        // Debout on tirerait au-dessus/en dessous de la cible : s'accroupir suffit à la toucher.
-        controls.down = true; controls.left = false; controls.right = false;
-      }
-      controls.shoot = true;
-    }
-    // Sinon (menace lointaine, dans notre dos, pas pressante) : on continue simplement d'avancer
-    // vers l'objectif, ce qui l'éloigne déjà — pas besoin de rebrousser chemin pour si peu.
-  } else if(boss && !controls.jump){
-    const bcx = boss.x + boss.w/2, pcx = p.x + p.w/2;
-    const facingBoss = (bcx > pcx && goalDir > 0) || (bcx < pcx && goalDir < 0);
-    if(facingBoss && Math.abs(bcx - pcx) < 380) controls.shoot = true;
-  }
-
-  return controls;
-}
-
 function controlsP1(){
-  const raw = rawControlsP1();
-  if(raw.left || raw.right || raw.down || raw.jump || raw.shoot) resetBotIdleTimer();
-
-  if(onlineMode && state === STATE_PLAYING && (Date.now() - lastInputTime >= BOT_IDLE_MS)){
-    botTakeoverActive = true;
-    if(isHost){
-      // L'hôte a l'état de jeu réel et à jour : il peut calculer sa propre esquive en confiance.
-      return computeAutoPilotControls(onlineHostPlayers[myId] || player);
-    }
-    // IMPORTANT : un invité ne doit JAMAIS calculer lui-même ses mouvements de pilotage automatique.
-    // Son état local (ennemis/projectiles/boss) provient du dernier instantané réseau reçu, donc en
-    // retard par rapport à l'hôte. Si chaque machine décidait seule de l'esquive à partir de données
-    // différentes, les deux simulations divergeraient (l'hôte peut voir un coup mortel que l'invité,
-    // lui, ne voit pas se produire, ou inversement). On envoie donc "aucune touche" : c'est l'hôte,
-    // seule source de vérité, qui calcule et pilote ce joueur (voir getOnlineControlsFor).
-    return raw;
-  }
-  return raw;
+  return rawControlsP1();
 }
+
 function controlsP2(){
   return {
     left: isKeyDown('j'),
@@ -2071,7 +1743,6 @@ function leaveOnlineRoom(){
   onlineMode = false; isHost = false; roomCode = null;
   remoteInputs = {}; onlineMeta = {}; onlineHostPlayers = {}; remoteSnapshot = null;
   renderPlayers = {}; lastSentCoinsTaken = null; myPredPlayer = null; lastKnownLives = null;
-  hostLastActiveTime = {}; hostBotActive = {};
   document.getElementById('onlineLeaveBtn').style.display = 'none';
   onlineSetStatus('Non connecté.');
   state = STATE_MENU;
@@ -2274,7 +1945,6 @@ function initLevel(){
   cameraX = 0; cameraX2 = 0;
   livesLostThisLevel = 0;
   if(onlineMode && isHost){ onlineHostPlayers = {}; lastSentCoinsTaken = null; }
-  resetBotIdleTimer();
 }
 
 function advanceAfterLevelClear(){
@@ -3024,26 +2694,9 @@ function ensureHostPlayer(id){
   }
 }
 
-// Détection d'inactivité CÔTÉ HÔTE pour chaque invité : basée sur l'horloge de l'hôte et sur les
-// touches réellement reçues (jamais sur un drapeau envoyé par l'invité), pour que la décision
-// "ce joueur est inactif" et le pilotage automatique qui en découle soient calculés une seule fois,
-// par une seule machine faisant autorité — évitant que l'hôte et l'invité voient des résultats différents.
-let hostLastActiveTime = {};
-let hostBotActive = {};
-function isControlsIdle(c){ return !c || !(c.left || c.right || c.down || c.jump || c.shoot); }
-
 function getOnlineControlsFor(id){
   if(id === myId) return controlsP1();
-  const raw = remoteInputs[id] || {left:false,right:false,down:false,jump:false,shoot:false};
-  const now = Date.now();
-  if(hostLastActiveTime[id] == null || !isControlsIdle(raw)) hostLastActiveTime[id] = isControlsIdle(raw) ? (hostLastActiveTime[id] || now) : now;
-  const idleFor = now - hostLastActiveTime[id];
-  if(idleFor >= BOT_IDLE_MS){
-    hostBotActive[id] = true;
-    return computeAutoPilotControls(onlineHostPlayers[id]);
-  }
-  hostBotActive[id] = false;
-  return raw;
+  return remoteInputs[id] || {left:false,right:false,down:false,jump:false,shoot:false};
 }
 
 function updateOnlineHost(){
@@ -3053,7 +2706,7 @@ function updateOnlineHost(){
   if(!onlineMeta[myId]) onlineMeta[myId] = { charId: currentCharacterId, slot: 0, name: playerName };
   const ids = Object.keys(onlineMeta);
   ids.forEach(id => ensureHostPlayer(id));
-  Object.keys(onlineHostPlayers).forEach(id => { if(!onlineMeta[id]){ delete onlineHostPlayers[id]; delete hostLastActiveTime[id]; delete hostBotActive[id]; } });
+  Object.keys(onlineHostPlayers).forEach(id => { if(!onlineMeta[id]){ delete onlineHostPlayers[id]; } });
 
   const activeIds = Object.keys(onlineHostPlayers);
   activeIds.forEach(id => {
@@ -3159,8 +2812,7 @@ function updateOnlineHost(){
     const playersSnap = {};
     activeIds.forEach(id => {
       const p = onlineHostPlayers[id];
-      const botFlag = (id === myId) ? botTakeoverActive : !!hostBotActive[id];
-      playersSnap[id] = { x: Math.round(p.x), y: Math.round(p.y), vx: Math.round(p.vx*10)/10, facing: p.facing, onGround: p.onGround, crouch: p.h === PLAYER_CROUCH_HEIGHT, inv: p.invincibleTimer > 0 ? 1 : 0, charId: (onlineMeta[id]&&onlineMeta[id].charId)||'zkr', slot: (onlineMeta[id]&&onlineMeta[id].slot)||0, bot: botFlag ? 1 : 0 };
+      playersSnap[id] = { x: Math.round(p.x), y: Math.round(p.y), vx: Math.round(p.vx*10)/10, facing: p.facing, onGround: p.onGround, crouch: p.h === PLAYER_CROUCH_HEIGHT, inv: p.invincibleTimer > 0 ? 1 : 0, charId: (onlineMeta[id]&&onlineMeta[id].charId)||'zkr', slot: (onlineMeta[id]&&onlineMeta[id].slot)||0 };
     });
     const payload = {
       world: worldIndex, level: levelIndex, state,
@@ -3252,42 +2904,22 @@ function updateOnlineGuest(){
   // (RTT) — la comparer en direct revient à tirer le perso vers son propre passé, ce qui combat
   // l'input et donne une sensation de lag pire qu'avant. On ne recale que sur un vrai événement
   // de jeu sans ambiguïté (dégâts/mort), détecté via la baisse du nombre de vies.
-  //
-  // EXCEPTION : pendant que l'hôte pilote ce joueur en automatique (bot d'inactivité), on n'utilise
-  // PAS la prédiction locale — on affiche directement la position faisant autorité reçue de l'hôte.
-  // Sans ça, l'hôte calculerait un déplacement/une esquive avec l'état réel du jeu pendant que
-  // l'invité, lui, prédirait un déplacement différent avec un état local en retard : les deux
-  // écrans finiraient par diverger (l'un voit une mort que l'autre ne voit pas). En pilotage
-  // automatique il n'y a de toute façon aucune touche locale à prédire, donc suivre l'hôte
-  // à l'identique est à la fois plus simple et strictement plus fiable.
-  const myPs = remoteSnapshot.players && remoteSnapshot.players[myId];
-  const iAmBotControlled = !!(myPs && myPs.bot);
 
   if(state === STATE_PLAYING && myPredPlayer && level){
     level.movingPlatforms.forEach(mp => mp.update(frameTick)); // nécessaire pour que les collisions locales (et leur affichage) restent justes
 
-    if(iAmBotControlled && myPs){
-      const dx = myPs.x - myPredPlayer.x, dy = myPs.y - myPredPlayer.y;
-      if(Math.abs(dx) > 250 || Math.abs(dy) > 250){ myPredPlayer.x = myPs.x; myPredPlayer.y = myPs.y; }
-      else { myPredPlayer.x += dx * 0.5; myPredPlayer.y += dy * 0.5; }
-      myPredPlayer.vx = myPs.vx; myPredPlayer.facing = myPs.facing; myPredPlayer.onGround = myPs.onGround;
-      myPredPlayer.h = myPs.crouch ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT;
-      if(myPredPlayer.invincibleTimer > 0) myPredPlayer.invincibleTimer--;
-      else if(myPs.inv) myPredPlayer.invincibleTimer = 40;
-    } else {
-      myPredPlayer.update(controlsP1(), level.solids);
+    myPredPlayer.update(controlsP1(), level.solids);
 
-      // Rebond en sautant sur un ennemi : uniquement l'effet VISUEL (vy = -10), reproduit ici
-      // pour que ça se sente pareil que chez l'hôte. Le vrai résultat (ennemi tué/touché, score)
-      // reste calculé UNIQUEMENT par l'hôte et arrive via l'instantané (enemies, score) — on ne
-      // fait ici aucun dégât et on ne touche pas au score pour ne pas désynchroniser la partie.
-      enemies.forEach(e => {
-        if(!e.alive) return;
-        if(rectsOverlap(myPredPlayer.rect, e.rect) && myPredPlayer.vy > 0 && myPredPlayer.y + myPredPlayer.h - myPredPlayer.vy <= e.y + 15){
-          myPredPlayer.vy = -10;
-        }
-      });
-    }
+    // Rebond en sautant sur un ennemi : uniquement l'effet VISUEL (vy = -10), reproduit ici
+    // pour que ça se sente pareil que chez l'hôte. Le vrai résultat (ennemi tué/touché, score)
+    // reste calculé UNIQUEMENT par l'hôte et arrive via l'instantané (enemies, score) — on ne
+    // fait ici aucun dégât et on ne touche pas au score pour ne pas désynchroniser la partie.
+    enemies.forEach(e => {
+      if(!e.alive) return;
+      if(rectsOverlap(myPredPlayer.rect, e.rect) && myPredPlayer.vy > 0 && myPredPlayer.y + myPredPlayer.h - myPredPlayer.vy <= e.y + 15){
+        myPredPlayer.vy = -10;
+      }
+    });
   }
   if(lastKnownLives != null && lives < lastKnownLives && myPredPlayer && level){
     myPredPlayer.reset(level.startX, level.startY);
@@ -3564,15 +3196,6 @@ function gameLoop(){
       ctx.textAlign = 'right';
       ctx.fillText(`${theme.name} - ${LEVEL_NAMES[levelIndex]}   |   Salon ${roomCode} (${nbPlayers} joueurs)   |   Ping: ${pingLabel} ${connLabel}`, WIDTH - 20, 30);
       ctx.textAlign = 'left';
-      if(botTakeoverActive){
-        ctx.save();
-        ctx.font = 'bold 14px Arial';
-        ctx.textAlign = 'center';
-        const blink = (frameTick % 40 < 24);
-        ctx.fillStyle = blink ? '#ffcc33' : '#ff9900';
-        ctx.fillText('🤖 BOT ACTIF — inactivité détectée, pilotage automatique en cours', WIDTH/2, 46);
-        ctx.restore();
-      }
     } else if(coopMode){
       ctx.fillText(`VIES (ÉQUIPE) : ${"❤️".repeat(Math.max(0, lives))}   |   SCORE : ${score}`, 20, 30);
       ctx.textAlign = 'right'; ctx.fillText(`${theme.name} - ${LEVEL_NAMES[levelIndex]}   |   J2 = vert`, WIDTH - 20, 30); ctx.textAlign = 'left';
