@@ -13,8 +13,64 @@
     display: flex; align-items: center; justify-content: center;
     font-family: Arial, Helvetica, sans-serif;
     overflow: hidden;
+    gap: 14px;
   }
   #wrap { text-align: center; position: relative; }
+  #chatPanel {
+    display: none;
+    flex-direction: column;
+    width: 250px;
+    height: 540px;
+    max-height: 80vh;
+    background: rgba(18,13,26,0.94);
+    border: 3px solid #333;
+    border-radius: 10px;
+    box-shadow: 0 0 40px rgba(0,0,0,0.6);
+    color: #fff;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  #chatPanel.active { display: flex; }
+  #chatHeader {
+    padding: 10px 12px;
+    font-weight: bold; font-size: 14px;
+    background: rgba(255,255,255,0.06);
+    border-bottom: 1px solid rgba(255,255,255,0.15);
+    flex-shrink: 0;
+  }
+  #chatMessages {
+    flex: 1; overflow-y: auto;
+    padding: 8px 10px;
+    font-size: 13px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .chatMsg { line-height: 1.35; word-break: break-word; }
+  .chatMsg .chatName { font-weight: bold; margin-right: 4px; }
+  .chatMsg.self .chatName { color: #5fd0ff; }
+  .chatMsg.other .chatName { color: #ffcf5f; }
+  .chatMsg.system { color: #999; font-style: italic; font-size: 12px; }
+  #chatInputRow {
+    display: flex; gap: 6px; padding: 8px;
+    border-top: 1px solid rgba(255,255,255,0.15);
+    flex-shrink: 0;
+  }
+  #chatInput {
+    flex: 1; min-width: 0; padding: 8px;
+    border-radius: 8px; border: 2px solid rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.08); color: #fff;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  #chatSendBtn {
+    background: linear-gradient(#2f6fe0, #1c4aa8);
+    border: 2px solid #5b93f0; color: #fff;
+    border-radius: 8px; padding: 0 14px; font-weight: bold;
+    cursor: pointer; font-family: Arial, Helvetica, sans-serif;
+  }
+  #chatSendBtn:active { transform: scale(0.96); }
+  @media (max-width: 900px) {
+    html, body { flex-direction: column; overflow-y: auto; }
+    #chatPanel { width: 92vw; max-width: 960px; height: 160px; max-height: 26vh; }
+  }
   canvas {
     background: #000;
     display: block;
@@ -281,6 +337,15 @@
 
       <button id="closeSettingsBtn">FERMER</button>
     </div>
+  </div>
+</div>
+
+<div id="chatPanel">
+  <div id="chatHeader">💬 Chat en direct</div>
+  <div id="chatMessages"></div>
+  <div id="chatInputRow">
+    <input id="chatInput" maxlength="150" placeholder="Message...">
+    <button id="chatSendBtn">Envoyer</button>
   </div>
 </div>
 
@@ -1906,7 +1971,7 @@ let onlineMode = false;
 let isHost = false;
 let roomCode = null;
 const myId = 'p_' + Math.random().toString(36).slice(2, 9);
-let onlineRoomRef = null, onlineInputsRef = null, onlineStateRef = null, onlinePlayersRef = null, onlinePresenceRef = null;
+let onlineRoomRef = null, onlineInputsRef = null, onlineStateRef = null, onlinePlayersRef = null, onlinePresenceRef = null, onlineChatRef = null;
 let remoteInputs = {};
 let onlineMeta = {};
 let onlineHostPlayers = {};
@@ -1946,11 +2011,58 @@ function onlineSetStatus(msg){
   if(el) el.textContent = msg;
 }
 
+const chatPanel = document.getElementById('chatPanel');
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const chatSendBtn = document.getElementById('chatSendBtn');
+
+function appendChatMessage(msg){
+  if(!msg || !msg.text) return;
+  const div = document.createElement('div');
+  div.className = 'chatMsg ' + (msg.id === myId ? 'self' : 'other');
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'chatName';
+  nameSpan.textContent = (msg.name || 'Joueur') + ' :';
+  div.appendChild(nameSpan);
+  div.appendChild(document.createTextNode(msg.text));
+  chatMessages.appendChild(div);
+  while(chatMessages.children.length > 60) chatMessages.removeChild(chatMessages.firstChild);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function setupChatForRoom(){
+  chatMessages.innerHTML = '';
+  chatPanel.classList.add('active');
+  if(onlineChatRef) onlineChatRef.off();
+  onlineChatRef = onlineRoomRef.child('chat');
+  onlineChatRef.limitToLast(60).on('child_added', snap => appendChatMessage(snap.val()));
+}
+
+function teardownChat(){
+  if(onlineChatRef) onlineChatRef.off();
+  onlineChatRef = null;
+  chatPanel.classList.remove('active');
+  chatMessages.innerHTML = '';
+}
+
+function sendChatMessage(){
+  const text = chatInput.value.trim().slice(0, 150);
+  if(!text || !onlineChatRef) { chatInput.value = ''; return; }
+  chatInput.value = '';
+  onlineChatRef.push({ id: myId, name: playerName, text, ts: firebase.database.ServerValue.TIMESTAMP }).catch(() => {});
+}
+
+chatSendBtn.addEventListener('click', sendChatMessage);
+chatInput.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ sendChatMessage(); }
+});
+
 function cleanupOnlineRefs(){
   if(onlineInputsRef) onlineInputsRef.off();
   if(onlineStateRef) onlineStateRef.off();
   if(onlinePlayersRef) onlinePlayersRef.off();
   if(onlinePresenceRef) { onlinePresenceRef.onDisconnect().cancel(); onlinePresenceRef.remove().catch(()=>{}); }
+  teardownChat();
   onlineRoomRef = onlineInputsRef = onlineStateRef = onlinePlayersRef = onlinePresenceRef = null;
 }
 
@@ -1993,6 +2105,7 @@ function createOnlineRoom(){
 
   document.getElementById('onlineLeaveBtn').style.display = '';
   onlineSetStatus(`Salon créé : ${roomCode}`);
+  setupChatForRoom();
 
   worldIndex = 0; levelIndex = 0; lives = 3; score = 0;
   state = STATE_PLAYING; initLevel();
@@ -2046,6 +2159,7 @@ function joinOnlineRoom(code){
 
     document.getElementById('onlineLeaveBtn').style.display = '';
     onlineSetStatus(`Connecté au salon ${roomCode}. En attente de l'hôte...`);
+    setupChatForRoom();
     remoteSnapshot = null; onlineWorld = -1; onlineLevel = -1;
     renderPlayers = {}; myPredPlayer = null; lastKnownLives = null;
     state = STATE_PLAYING;
@@ -2277,6 +2391,8 @@ function onKeyPress(key){
 
 const HANDLED_KEYS = [' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Escape'];
 window.addEventListener('keydown', e => {
+  const tag = document.activeElement && document.activeElement.tagName;
+  if(tag === 'INPUT' || tag === 'TEXTAREA') return;
   if(settingsOverlay && !settingsOverlay.classList.contains('hidden')){
     if(rebindingAction){
       e.preventDefault();
