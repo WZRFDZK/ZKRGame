@@ -1552,7 +1552,7 @@ const STATE_DEVICE = -1, STATE_MENU = 0, STATE_PLAYING = 1, STATE_LEVEL_CLEAR = 
 const LEVELS_PER_WORLD = LEVEL_NAMES.length;
 function FLAT(w, l){ return w * LEVELS_PER_WORLD + l; }
 
-let state = STATE_DEVICE, worldIndex = 0, levelIndex = 0, lives = 3, score = 0, cameraX = 0, levelTransitionTimer = 0, frameTick = 0;
+let state = STATE_DEVICE, worldIndex = 0, levelIndex = 0, lives = 3, lives2 = 3, score = 0, cameraX = 0, levelTransitionTimer = 0, frameTick = 0;
 
 const DEFAULT_KEYBINDS = { left: 'q', right: 'd', down: 's', jump: ' ', shoot: 'e' };
 let KEYBINDS = { ...DEFAULT_KEYBINDS };
@@ -1642,6 +1642,7 @@ try {
 let onlineMode = false;
 let isHost = false;
 let roomCode = null;
+let onlinePlayerLives = {}; // vies individuelles en ligne : { [id joueur]: nombre de vies }
 const myId = 'p_' + Math.random().toString(36).slice(2, 9);
 let onlineRoomRef = null, onlineInputsRef = null, onlineStateRef = null, onlinePlayersRef = null, onlinePresenceRef = null, onlineChatRef = null;
 let remoteInputs = {};
@@ -1652,6 +1653,43 @@ let renderPlayers = {}; // positions lissées (invité) pour les AUTRES joueurs 
 let myPredPlayer = null; // instance Player simulée localement à 60 fps chez l'invité, pour SON PROPRE personnage (prédiction côté client)
 let lastKnownLives = null; // sert à détecter une perte de vie (dégâts/mort) pour recaler le perso prédit, sans comparer de positions
 let onlineWorld = 0, onlineLevel = 0;
+
+// ===================== Mode spectateur (joueur éliminé en ligne) =====================
+// Un joueur qui a perdu toutes ses vies mais dont le salon continue (les autres ont encore
+// des vies) passe automatiquement en spectateur : sa caméra suit un autre joueur de la room,
+// et il peut changer de cible avec les touches de déplacement gauche/droite.
+let spectateTargetId = null;
+function amIEliminated(){
+  if(!onlineMode) return false;
+  if(isHost) return (onlinePlayerLives[myId] ?? MAX_LIVES) <= 0;
+  return lives <= 0;
+}
+function getRoomMemberLives(id){
+  if(isHost) return onlinePlayerLives[id] ?? MAX_LIVES;
+  return (remoteSnapshot && remoteSnapshot.lives && remoteSnapshot.lives[id] != null) ? remoteSnapshot.lives[id] : MAX_LIVES;
+}
+function getSpectateCandidateIds(){
+  return Object.keys(onlineMeta)
+    .filter(id => id !== myId)
+    .sort((a,b) => ((onlineMeta[a]&&onlineMeta[a].slot)||0) - ((onlineMeta[b]&&onlineMeta[b].slot)||0));
+}
+function ensureSpectateTarget(){
+  const candidates = getSpectateCandidateIds();
+  if(candidates.length === 0){ spectateTargetId = null; return; }
+  if(!spectateTargetId || !candidates.includes(spectateTargetId)){
+    const alive = candidates.filter(id => getRoomMemberLives(id) > 0);
+    spectateTargetId = alive[0] || candidates[0];
+  }
+}
+function cycleSpectateTarget(dir){
+  const candidates = getSpectateCandidateIds();
+  if(candidates.length === 0) return;
+  if(!spectateTargetId){ spectateTargetId = candidates[0]; return; }
+  let idx = candidates.indexOf(spectateTargetId);
+  if(idx === -1) idx = 0;
+  idx = (idx + dir + candidates.length) % candidates.length;
+  spectateTargetId = candidates[idx];
+}
 let lastPingMs = null;      // RTT réel mesuré vers le serveur Firebase (aller-retour d'écriture)
 let fbConnected = null;     // état de la connexion socket Firebase (.info/connected)
 let lastOnlineSendTick = -999, lastOnlineBroadcastTick = -999;
@@ -1741,8 +1779,9 @@ function cleanupOnlineRefs(){
 function leaveOnlineRoom(){
   cleanupOnlineRefs();
   onlineMode = false; isHost = false; roomCode = null;
-  remoteInputs = {}; onlineMeta = {}; onlineHostPlayers = {}; remoteSnapshot = null;
+  remoteInputs = {}; onlineMeta = {}; onlineHostPlayers = {}; onlinePlayerLives = {}; remoteSnapshot = null;
   renderPlayers = {}; lastSentCoinsTaken = null; myPredPlayer = null; lastKnownLives = null;
+  spectateTargetId = null;
   document.getElementById('onlineLeaveBtn').style.display = 'none';
   onlineSetStatus('Non connecté.');
   state = STATE_MENU;
@@ -1769,7 +1808,7 @@ function createOnlineRoom(){
     const newMeta = {};
     ids.forEach((id, i) => { newMeta[id] = { charId: val[id].charId || 'zkr', slot: i, name: (val[id].name && String(val[id].name).slice(0,14)) || 'Joueur' }; });
     onlineMeta = newMeta;
-    Object.keys(onlineHostPlayers).forEach(id => { if(!newMeta[id]) delete onlineHostPlayers[id]; });
+    Object.keys(onlineHostPlayers).forEach(id => { if(!newMeta[id]){ delete onlineHostPlayers[id]; delete onlinePlayerLives[id]; } });
     onlineSetStatus(`Salon ${roomCode} — ${ids.length}/4 joueur(s) connecté(s). Partage ce code à tes amis !`);
   });
   onlineInputsRef.on('value', snap => { remoteInputs = snap.val() || {}; });
@@ -1779,6 +1818,7 @@ function createOnlineRoom(){
   setupChatForRoom();
 
   worldIndex = 0; levelIndex = 0; lives = 3; score = 0;
+  onlinePlayerLives = {};
   state = STATE_PLAYING; initLevel();
   closeSettings();
 }
@@ -1876,6 +1916,42 @@ let livesLostThisWorld = 0;
 let livesLostThisLevel = 0;
 let levelClearStars = 3, levelClearCoins = 0, levelClearCoinsTotal = 0;
 
+// ===================== Régénération de vie tous les 50 points =====================
+// Chaque fois que le score franchit un palier de 50, chaque joueur qui n'a pas 3 vies
+// complètes en récupère une (y compris un joueur totalement éliminé, qui revient alors
+// en jeu à l'endroit de départ du niveau).
+const MAX_LIVES = 3;
+let lastLifeMilestone = 0;
+function checkLifeRegen(){
+  const milestone = Math.floor(score / 50);
+  if(milestone === lastLifeMilestone) return;
+  if(milestone > lastLifeMilestone){
+    for(let i = lastLifeMilestone; i < milestone; i++) grantLifeRegenTick();
+  }
+  lastLifeMilestone = milestone;
+}
+function grantLifeRegenTick(){
+  if(onlineMode){
+    if(!isHost) return; // l'hôte est seul autoritaire sur les vies en ligne
+    Object.keys(onlineHostPlayers).forEach(id => {
+      const cur = onlinePlayerLives[id] ?? 0;
+      if(cur >= MAX_LIVES) return;
+      const wasEliminated = cur <= 0;
+      onlinePlayerLives[id] = cur + 1;
+      if(wasEliminated){
+        const p = onlineHostPlayers[id];
+        const slot = (onlineMeta[id] && onlineMeta[id].slot) || 0;
+        p.reset(level.startX + slot*40, level.startY);
+      }
+    });
+  } else if(coopMode){
+    if(lives < MAX_LIVES){ const wasEliminated = lives <= 0; lives++; if(wasEliminated) player.reset(level.startX, level.startY); }
+    if(lives2 < MAX_LIVES){ const wasEliminated = lives2 <= 0; lives2++; if(wasEliminated) player2.reset(level.startX, level.startY); }
+  } else {
+    if(lives < MAX_LIVES){ const wasEliminated = lives <= 0; lives++; if(wasEliminated) player.reset(level.startX, level.startY); }
+  }
+}
+
 let unlockedFlat = 0;
 let checkpointWorld = 0;
 let checkpointScore = 0;
@@ -1889,7 +1965,7 @@ let savedData = null;
 function saveGame(){
   try{
     const data = {
-      worldIndex, levelIndex, lives, score,
+      worldIndex, levelIndex, lives, lives2, score,
       unlockedFlat, checkpointWorld, checkpointScore,
       currentCharacterId, isMobile, playerName,
       musicEnabled, musicVolume, KEYBINDS, coopMode,
@@ -1914,6 +1990,7 @@ function applySavedData(d){
   worldIndex = d.worldIndex ?? 0;
   levelIndex = d.levelIndex ?? 0;
   lives = d.lives ?? 3;
+  lives2 = d.lives2 ?? 3;
   score = d.score ?? 0;
   unlockedFlat = d.unlockedFlat ?? 0;
   checkpointWorld = d.checkpointWorld ?? 0;
@@ -1969,14 +2046,14 @@ function advanceAfterLevelClear(){
 }
 
 function retryCurrentLevel(){
-  lives = 3;
+  lives = 3; lives2 = 3;
   initLevel();
   state = STATE_PLAYING;
   saveGame();
 }
 
 function startNewGame(){
-  worldIndex = 0; levelIndex = 0; lives = 3; score = 0;
+  worldIndex = 0; levelIndex = 0; lives = 3; lives2 = 3; score = 0;
   unlockedFlat = 0; checkpointWorld = 0; checkpointScore = 0;
   livesLostThisWorld = 0;
   state = STATE_PLAYING; initLevel();
@@ -1984,7 +2061,7 @@ function startNewGame(){
 }
 
 function respawnAtCheckpoint(){
-  worldIndex = checkpointWorld; levelIndex = 0; lives = 3; score = checkpointScore;
+  worldIndex = checkpointWorld; levelIndex = 0; lives = 3; lives2 = 3; score = checkpointScore;
   state = STATE_PLAYING; initLevel();
   saveGame();
 }
@@ -1998,7 +2075,7 @@ function openMap(fromPause){
 function tryLaunchFromMap(){
   const flat = FLAT(mapCursorWorld, mapCursorLevel);
   if(flat > unlockedFlat) return;
-  worldIndex = mapCursorWorld; levelIndex = mapCursorLevel; lives = 3;
+  worldIndex = mapCursorWorld; levelIndex = mapCursorLevel; lives = 3; lives2 = 3;
   checkpointWorld = mapCursorWorld; checkpointScore = score;
   state = STATE_PLAYING; initLevel();
   saveGame();
@@ -2038,7 +2115,9 @@ function onKeyPress(key){
     if(key === ' ') startNewGame();
     else if(key === 'm' || key === 'M') openMap(false);
   } else if(state === STATE_PLAYING){
-    if(key === 'Escape') openMap(true);
+    if(onlineMode && amIEliminated() && (key === 'ArrowLeft' || key === KEYBINDS.left)) cycleSpectateTarget(-1);
+    else if(onlineMode && amIEliminated() && (key === 'ArrowRight' || key === KEYBINDS.right)) cycleSpectateTarget(1);
+    else if(key === 'Escape') openMap(true);
     else if(key === 'c' || key === 'C') openCharacterSelect(true);
   } else if(state === STATE_LEVEL_CLEAR){
     if(key === ' ' || key === 'Enter') advanceAfterLevelClear();
@@ -2336,7 +2415,8 @@ function drawLevelClearPanel(){
   ctx.fillStyle = '#fff'; ctx.font = 'bold 24px Arial';
   ctx.fillText(`SCORE : ${score}`, px+panelW/2, py+142);
   ctx.font = '16px Arial'; ctx.fillStyle = '#e6e6e6';
-  ctx.fillText(`🪙 ${levelClearCoins} / ${levelClearCoinsTotal}      ${"❤️".repeat(Math.max(0, lives))}`, px+panelW/2, py+172);
+  const myPanelLives = onlineMode ? (isHost ? (onlinePlayerLives[myId] ?? 0) : lives) : lives;
+  ctx.fillText(`🪙 ${levelClearCoins} / ${levelClearCoinsTotal}      ${(coopMode && !onlineMode) ? `J1 ${"❤️".repeat(Math.max(0, lives))}  J2 ${"❤️".repeat(Math.max(0, lives2))}` : "❤️".repeat(Math.max(0, myPanelLives))}`, px+panelW/2, py+172);
 
   const hintContinue = isMobile ? 'SAUT' : 'ESPACE';
   const hintRetry = isMobile ? 'TIR' : 'R';
@@ -2674,11 +2754,24 @@ function drawPlatformTexture(worldIdx, r){
 function damagePlayer(p){
   p = p || player;
   if(state !== STATE_PLAYING) return;
+  const isP2 = coopMode && p === player2;
+  // Vies individuelles : chaque joueur a son propre capital de vies, plus de pot commun d'équipe.
+  if((isP2 ? lives2 : lives) <= 0) return; // déjà éliminé, rien à faire
   livesLostThisLevel++;
   livesLostThisWorld++;
-  lives--;
-  if(lives <= 0){ lives = 0; state = STATE_GAME_OVER; saveGame(); }
-  else { p.reset(level.startX, level.startY); }
+  if(isP2){
+    lives2--;
+    if(lives2 <= 0){ lives2 = 0; } else { p.reset(level.startX, level.startY); }
+  } else {
+    lives--;
+    if(lives <= 0){ lives = 0; } else { p.reset(level.startX, level.startY); }
+  }
+  // Game over uniquement quand TOUS les joueurs actifs ont perdu toutes leurs vies.
+  if(coopMode){
+    if(lives <= 0 && lives2 <= 0){ state = STATE_GAME_OVER; saveGame(); }
+  } else if(lives <= 0){
+    state = STATE_GAME_OVER; saveGame();
+  }
 }
 
 // ===================== BOUCLE HÔTE (multijoueur en ligne) =====================
@@ -2692,6 +2785,7 @@ function ensureHostPlayer(id){
     p.reset(level.startX + slot*40, level.startY);
     onlineHostPlayers[id] = p;
   }
+  if(onlinePlayerLives[id] == null) onlinePlayerLives[id] = 3; // vies propres à chaque joueur connecté
 }
 
 function getOnlineControlsFor(id){
@@ -2701,14 +2795,18 @@ function getOnlineControlsFor(id){
 
 function updateOnlineHost(){
   if(state !== STATE_PLAYING) return;
+  checkLifeRegen();
   level.movingPlatforms.forEach(mp => mp.update(frameTick));
 
   if(!onlineMeta[myId]) onlineMeta[myId] = { charId: currentCharacterId, slot: 0, name: playerName };
   const ids = Object.keys(onlineMeta);
   ids.forEach(id => ensureHostPlayer(id));
-  Object.keys(onlineHostPlayers).forEach(id => { if(!onlineMeta[id]){ delete onlineHostPlayers[id]; } });
+  Object.keys(onlineHostPlayers).forEach(id => { if(!onlineMeta[id]){ delete onlineHostPlayers[id]; delete onlinePlayerLives[id]; } });
 
-  const activeIds = Object.keys(onlineHostPlayers);
+  const allIds = Object.keys(onlineHostPlayers);
+  // Un joueur éliminé (0 vie) est gelé : plus de simulation/collision pour lui, mais il reste
+  // affiché aux autres et le reste de l'équipe peut continuer le niveau sans lui.
+  const activeIds = allIds.filter(id => (onlinePlayerLives[id] ?? 3) > 0);
   activeIds.forEach(id => {
     const p = onlineHostPlayers[id];
     const controls = getOnlineControlsFor(id);
@@ -2719,16 +2817,19 @@ function updateOnlineHost(){
     }
   });
 
-  // Caméra hôte : centrée sur soi-même (myId), pour son propre affichage
-  const myP = onlineHostPlayers[myId];
-  if(myP){
-    cameraX += ((myP.x - WIDTH/3) - cameraX) * 0.1;
+  // Caméra hôte : centrée sur soi-même (myId), sauf si éliminé : dans ce cas on suit
+  // le joueur actuellement observé en mode spectateur.
+  if(amIEliminated()) ensureSpectateTarget(); else spectateTargetId = null;
+  let camFollowP = onlineHostPlayers[myId];
+  if(amIEliminated() && spectateTargetId && onlineHostPlayers[spectateTargetId]) camFollowP = onlineHostPlayers[spectateTargetId];
+  if(camFollowP){
+    cameraX += ((camFollowP.x - WIDTH/3) - cameraX) * 0.1;
     cameraX = Math.max(0, Math.min(cameraX, level.width - WIDTH));
   }
 
   activeIds.forEach(id => {
     const p = onlineHostPlayers[id];
-    if(p.y > DEATH_Y && !isInSpawnZone(p)) damagePlayerOnline(p);
+    if(p.y > DEATH_Y && !isInSpawnZone(p)) damagePlayerOnline(id);
   });
 
   level.coins.forEach(c => {
@@ -2750,7 +2851,7 @@ function updateOnlineHost(){
           e.hit(); p.vy = -10;
           score += e.alive ? 1 : (e.isBoss ? 20 : 2);
           if(!e.alive) enemiesDefeatedAllTime++; if(e.isBoss && !e.alive) bossesDefeated++;
-        } else if(p.invincibleTimer <= 0 && !isInSpawnZone(p)){ damagePlayerOnline(p); }
+        } else if(p.invincibleTimer <= 0 && !isInSpawnZone(p)){ damagePlayerOnline(id); }
       }
     });
   });
@@ -2774,7 +2875,7 @@ function updateOnlineHost(){
     for(const pr of projectiles){
       if(pr.hostile && !pr.dead && rectsOverlap(p.rect, pr.rect)){
         pr.dead = true;
-        if(p.invincibleTimer <= 0 && !isInSpawnZone(p)) damagePlayerOnline(p);
+        if(p.invincibleTimer <= 0 && !isInSpawnZone(p)) damagePlayerOnline(id);
       }
     }
   });
@@ -2782,7 +2883,7 @@ function updateOnlineHost(){
 
   activeIds.forEach(id => {
     const p = onlineHostPlayers[id];
-    level.spikes.forEach(s => { if(state === STATE_PLAYING && rectsOverlap(p.rect, s) && p.invincibleTimer <= 0 && !isInSpawnZone(p)) damagePlayerOnline(p); });
+    level.spikes.forEach(s => { if(state === STATE_PLAYING && rectsOverlap(p.rect, s) && p.invincibleTimer <= 0 && !isInSpawnZone(p)) damagePlayerOnline(id); });
   });
 
   const bossAlive = enemies.some(e => e.isBoss && e.alive);
@@ -2810,16 +2911,16 @@ function updateOnlineHost(){
   if(frameTick - lastOnlineBroadcastTick >= ONLINE_BROADCAST_INTERVAL && onlineStateRef){
     lastOnlineBroadcastTick = frameTick;
     const playersSnap = {};
-    activeIds.forEach(id => {
+    allIds.forEach(id => {
       const p = onlineHostPlayers[id];
-      playersSnap[id] = { x: Math.round(p.x), y: Math.round(p.y), vx: Math.round(p.vx*10)/10, facing: p.facing, onGround: p.onGround, crouch: p.h === PLAYER_CROUCH_HEIGHT, inv: p.invincibleTimer > 0 ? 1 : 0, charId: (onlineMeta[id]&&onlineMeta[id].charId)||'zkr', slot: (onlineMeta[id]&&onlineMeta[id].slot)||0 };
+      playersSnap[id] = { x: Math.round(p.x), y: Math.round(p.y), vx: Math.round(p.vx*10)/10, facing: p.facing, onGround: p.onGround, crouch: p.h === PLAYER_CROUCH_HEIGHT, inv: p.invincibleTimer > 0 ? 1 : 0, charId: (onlineMeta[id]&&onlineMeta[id].charId)||'zkr', slot: (onlineMeta[id]&&onlineMeta[id].slot)||0, lives: onlinePlayerLives[id] ?? 0 };
     });
     const payload = {
       world: worldIndex, level: levelIndex, state,
       players: playersSnap,
       enemies: enemies.map(e => ({x: Math.round(e.x), y: Math.round(e.y), dir: e.dir, alive: e.alive, hp: e.hp, maxHp: e.maxHp})),
       projectiles: projectiles.map(p => ({x: Math.round(p.x), y: Math.round(p.y), dir: p.dir, color: p.color, h: p.hostile ? 1 : 0})),
-      score, lives, t: Date.now()
+      score, lives: { ...onlinePlayerLives }, t: Date.now()
     };
     // Le tableau des pièces ne change presque jamais d'une frame à l'autre : on ne le renvoie
     // que s'il a réellement changé, au lieu de le sérialiser/transmettre ~12 fois par seconde.
@@ -2832,13 +2933,20 @@ function updateOnlineHost(){
   }
 }
 
-function damagePlayerOnline(p){
+function damagePlayerOnline(id){
   if(state !== STATE_PLAYING) return;
+  const p = onlineHostPlayers[id];
+  if(!p || (onlinePlayerLives[id] ?? 0) <= 0) return; // déjà éliminé
   livesLostThisLevel++;
   livesLostThisWorld++;
-  lives--;
-  if(lives <= 0){ lives = 0; state = STATE_GAME_OVER; saveGame(); }
+  onlinePlayerLives[id]--;
+  if(onlinePlayerLives[id] <= 0){ onlinePlayerLives[id] = 0; }
   else { p.reset(level.startX, level.startY); }
+  // Game over du salon seulement quand TOUS les joueurs connectés ont perdu toutes leurs vies.
+  const ids = Object.keys(onlineHostPlayers);
+  if(ids.length > 0 && ids.every(pid => (onlinePlayerLives[pid] ?? 0) <= 0)){
+    state = STATE_GAME_OVER; saveGame();
+  }
 }
 
 // ===================== BOUCLE INVITÉ (multijoueur en ligne) =====================
@@ -2856,7 +2964,7 @@ function updateOnlineGuest(){
   ensureOnlineLevel(remoteSnapshot.world, remoteSnapshot.level);
   state = remoteSnapshot.state != null ? remoteSnapshot.state : STATE_PLAYING;
   score = remoteSnapshot.score || 0;
-  lives = remoteSnapshot.lives != null ? remoteSnapshot.lives : 3;
+  lives = (remoteSnapshot.lives && remoteSnapshot.lives[myId] != null) ? remoteSnapshot.lives[myId] : 3;
 
   if(remoteSnapshot.coinsTaken){
     remoteSnapshot.coinsTaken.forEach((taken, i) => { if(level.coins[i]) level.coins[i].taken = !!taken; });
@@ -2905,7 +3013,7 @@ function updateOnlineGuest(){
   // l'input et donne une sensation de lag pire qu'avant. On ne recale que sur un vrai événement
   // de jeu sans ambiguïté (dégâts/mort), détecté via la baisse du nombre de vies.
 
-  if(state === STATE_PLAYING && myPredPlayer && level){
+  if(state === STATE_PLAYING && myPredPlayer && level && lives > 0){
     level.movingPlatforms.forEach(mp => mp.update(frameTick)); // nécessaire pour que les collisions locales (et leur affichage) restent justes
 
     myPredPlayer.update(controlsP1(), level.solids);
@@ -2926,7 +3034,12 @@ function updateOnlineGuest(){
   }
   lastKnownLives = lives;
 
-  const camTargetX = myPredPlayer ? myPredPlayer.x : 0;
+  if(lives <= 0) ensureSpectateTarget(); else spectateTargetId = null;
+  let camTargetX = myPredPlayer ? myPredPlayer.x : 0;
+  if(lives <= 0 && spectateTargetId){
+    const rp = renderPlayers[spectateTargetId] || (remoteSnapshot.players && remoteSnapshot.players[spectateTargetId]);
+    if(rp) camTargetX = rp.x;
+  }
   cameraX += ((camTargetX - WIDTH/3) - cameraX) * 0.1;
   cameraX = Math.max(0, Math.min(cameraX, level.width - WIDTH));
 }
@@ -2940,22 +3053,29 @@ function gameLoop(){
     if(isHost) updateOnlineHost();
     else updateOnlineGuest();
   } else if(state === STATE_PLAYING && !settingsAreOpen){
+    checkLifeRegen();
     const VIEW_W = coopMode ? WIDTH/2 : WIDTH;
     level.movingPlatforms.forEach(mp => mp.update(frameTick));
 
-    player.update(controlsP1(), level.solids);
+    if(lives > 0){
+      player.update(controlsP1(), level.solids);
+      if(controlsP1().shoot) tryShootFor(player, getCharacter(currentCharacterId));
+    }
     cameraX += ((player.x - VIEW_W/3) - cameraX) * 0.1;
     cameraX = Math.max(0, Math.min(cameraX, level.width - VIEW_W));
-    if(controlsP1().shoot) tryShootFor(player, getCharacter(currentCharacterId));
 
     if(coopMode){
-      player2.update(controlsP2(), level.solids);
+      if(lives2 > 0){
+        player2.update(controlsP2(), level.solids);
+        if(controlsP2().shoot) tryShootFor(player2, getCharacterP2());
+      }
       cameraX2 += ((player2.x - VIEW_W/3) - cameraX2) * 0.1;
       cameraX2 = Math.max(0, Math.min(cameraX2, level.width - VIEW_W));
-      if(controlsP2().shoot) tryShootFor(player2, getCharacterP2());
     }
 
-    const activePlayers = coopMode ? [player, player2] : [player];
+    // Un joueur éliminé (0 vie) sort du jeu (plus de collisions/objectif) mais reste affiché,
+    // pendant que son coéquipier peut continuer seul le niveau.
+    const activePlayers = coopMode ? [player, player2].filter(p => (p === player2 ? lives2 : lives) > 0) : [player];
 
     activePlayers.forEach(p => { if(p.y > DEATH_Y && !isInSpawnZone(p)) damagePlayer(p); });
     level.coins.forEach(c => {
@@ -3017,7 +3137,7 @@ function gameLoop(){
       }
     });
     const atGoal = p => p.x + p.w > level.goalX && Math.abs((p.y + p.h) - level.goalY) < 120;
-    const goalReached = !bossAlive && activePlayers.every(atGoal);
+    const goalReached = !bossAlive && activePlayers.length > 0 && activePlayers.every(atGoal);
     if(state === STATE_PLAYING && goalReached){
       const coinsTotal = level.coins.length;
       const coinsCollected = level.coins.filter(c => c.taken).length;
@@ -3143,9 +3263,10 @@ function gameLoop(){
           });
         } else if(remoteSnapshot && remoteSnapshot.players){
           Object.keys(remoteSnapshot.players).forEach(id => {
-            if(id === myId && myPredPlayer){
+            if(id === myId && myPredPlayer && lives > 0){
               // Son propre personnage : dessiné depuis la simulation locale (60 fps, réactive),
-              // pas depuis le dernier paquet réseau reçu.
+              // pas depuis le dernier paquet réseau reçu. (Si éliminé, on tombe dans la branche
+              // générique ci-dessous qui dessine la position figée reçue de l'hôte.)
               const meta = onlineMeta[myId] || {charId: currentCharacterId, slot: 0, name: playerName};
               const charDef = getCharacterTinted(meta.charId || currentCharacterId, ONLINE_TINTS[meta.slot % ONLINE_TINTS.length]);
               if(myPredPlayer.invincibleTimer <= 0 || myPredPlayer.invincibleTimer % 8 < 5){
@@ -3190,14 +3311,24 @@ function gameLoop(){
     ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,WIDTH,50); ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial';
     if(onlineMode){
       const nbPlayers = isHost ? Object.keys(onlineHostPlayers).length : (remoteSnapshot && remoteSnapshot.players ? Object.keys(remoteSnapshot.players).length : 1);
-      ctx.fillText(`VIES (ÉQUIPE) : ${"❤️".repeat(Math.max(0, lives))}   |   SCORE : ${score}`, 20, 30);
+      const myOnlineLives = isHost ? (onlinePlayerLives[myId] ?? 0) : lives;
+      ctx.fillText(`VIES : ${"❤️".repeat(Math.max(0, myOnlineLives))}   |   SCORE : ${score}`, 20, 30);
       const pingLabel = lastPingMs == null ? '...' : (lastPingMs < 0 ? 'erreur' : `${lastPingMs}ms`);
       const connLabel = fbConnected === false ? '⚠️ DÉCONNECTÉ' : '';
       ctx.textAlign = 'right';
       ctx.fillText(`${theme.name} - ${LEVEL_NAMES[levelIndex]}   |   Salon ${roomCode} (${nbPlayers} joueurs)   |   Ping: ${pingLabel} ${connLabel}`, WIDTH - 20, 30);
       ctx.textAlign = 'left';
+      if(amIEliminated()){
+        const targetName = (spectateTargetId && onlineMeta[spectateTargetId] && onlineMeta[spectateTargetId].name) || '...';
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 54, WIDTH, 30);
+        ctx.fillStyle = '#ffcf5f'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+        ctx.fillText(`👁 MODE SPECTATEUR — POV de ${targetName}   (← →  pour changer)`, WIDTH/2, 74);
+        ctx.textAlign = 'left';
+        ctx.restore();
+      }
     } else if(coopMode){
-      ctx.fillText(`VIES (ÉQUIPE) : ${"❤️".repeat(Math.max(0, lives))}   |   SCORE : ${score}`, 20, 30);
+      ctx.fillText(`J1 : ${"❤️".repeat(Math.max(0, lives))}   J2 : ${"❤️".repeat(Math.max(0, lives2))}   |   SCORE : ${score}`, 20, 30);
       ctx.textAlign = 'right'; ctx.fillText(`${theme.name} - ${LEVEL_NAMES[levelIndex]}   |   J2 = vert`, WIDTH - 20, 30); ctx.textAlign = 'left';
     } else {
       ctx.fillText(`VIES : ${"❤️".repeat(Math.max(0, lives))}   |   SCORE : ${score}`, 20, 30);
