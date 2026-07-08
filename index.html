@@ -1593,26 +1593,98 @@ function botOnHazardNow(p){
   return level.spikes.some(s => r.x < s.x + s.w && r.x + r.w > s.x && r.y < s.y + s.h && r.y + r.h > s.y);
 }
 
+// Mémoire persistante du bot, attachée directement à l'instance Player pilotée : chaque joueur
+// (l'hôte lui-même, ou chaque invité idle piloté par l'hôte) a donc naturellement sa propre mémoire,
+// sans jamais se mélanger avec celle d'un autre joueur.
+function botMemory(p){
+  if(!p.__bot) p.__bot = { holdUntil: 0, knownEnemies: new Map(), lastSolid: null };
+  return p.__bot;
+}
+
+// "Écran visible" pour CE joueur : on reproduit la même formule que la vraie caméra du jeu
+// (centrée à WIDTH/3 devant lui, bornée aux limites du niveau) pour savoir ce qu'il aurait
+// réellement sous les yeux — et donc scruter TOUTE la partie visible, pas juste ses abords immédiats.
+function botVisibleBounds(p){
+  const left = Math.max(0, Math.min(p.x - WIDTH/3, Math.max(0, level.width - WIDTH)));
+  return { left, right: left + WIDTH };
+}
+
+// Anticipe la position d'un ennemi patrouilleur dans `frames` images, rebonds sur ses bornes de
+// patrouille compris — pour ne jamais être surpris par un ennemi qui aura fait demi-tour d'ici là.
+// (Le boss a sa propre IA à états, déjà traitée séparément via attackState/attackKind.)
+function botPredictEnemyX(e, frames){
+  if(e.isBoss) return e.x + e.w/2;
+  let x = e.x, dir = e.dir;
+  for(let i = 0; i < frames; i++){
+    x += e.speed * dir;
+    if(x < e.left){ x = e.left; dir = 1; }
+    else if(x + e.w > e.right){ x = e.right - e.w; dir = -1; }
+  }
+  return x + e.w/2;
+}
+
+// Détecte qu'un ennemi observé (visible à l'écran) vient de mourir depuis la dernière image :
+// déclenche une pause de sécurité avant de reprendre la route, plutôt que de foncer tête baissée.
+function botDetectKill(p){
+  const mem = botMemory(p);
+  const bounds = botVisibleBounds(p);
+  let justKilled = false;
+  enemies.forEach(e => {
+    const visible = (e.x + e.w) > bounds.left && e.x < bounds.right;
+    if(visible){
+      if(mem.knownEnemies.get(e) === true && !e.alive) justKilled = true;
+      mem.knownEnemies.set(e, e.alive);
+    } else {
+      mem.knownEnemies.delete(e);
+    }
+  });
+  return justKilled;
+}
+
+// Le solide (sol/plateforme) actuellement sous les pieds du joueur, ou null s'il est en l'air.
+function botCurrentSolid(p){
+  if(!p.onGround) return null;
+  const feetY = p.y + p.h + 3;
+  const cx = p.x + p.w/2;
+  return level.solids.find(s => cx > s.x && cx < s.x + s.w && Math.abs(s.y - feetY) < 8) || null;
+}
+
 // Cherche la menace la plus proche (n'importe quel ennemi vivant, boss inclus) à peu près au même
-// niveau vertical, dans N'IMPORTE QUELLE direction — pour que le bot réagisse à tout ce qui l'entoure,
-// pas seulement à ce qui se trouve devant lui dans le sens de la marche.
-function botNearestThreat(p, maxDist){
+// niveau vertical, N'IMPORTE OÙ dans la partie visible de l'écran — pas seulement devant lui dans
+// le sens de la marche — en se basant sur sa position ANTICIPÉE (pas seulement actuelle).
+function botNearestThreat(p){
+  const bounds = botVisibleBounds(p);
   let best = null, bestDist = Infinity, bestDir = 1;
   const pcx = p.x + p.w/2;
   enemies.forEach(e => {
     if(!e.alive) return;
+    if((e.x + e.w) < bounds.left || e.x > bounds.right) return; // hors du champ de vision
     if(Math.abs((e.y + e.h/2) - (p.y + p.h/2)) > 60) return;
-    const ecx = e.x + e.w/2;
-    const dist = Math.abs(ecx - pcx);
-    if(dist <= maxDist && dist < bestDist){ bestDist = dist; best = e; bestDir = ecx >= pcx ? 1 : -1; }
+    const predictedCx = botPredictEnemyX(e, 12); // ~0.2s d'anticipation sur son déplacement
+    const dist = Math.abs(predictedCx - pcx);
+    if(dist < bestDist){ bestDist = dist; best = e; bestDir = predictedCx >= pcx ? 1 : -1; }
   });
   return best ? { entity: best, dist: bestDist, dir: bestDir } : null;
+}
+
+// Estime si un tir toucherait la cible en restant DEBOUT, et/ou en s'ACCROUPISSANT (la ligne de
+// tir descend quand on est accroupi, car les pieds ne bougent pas mais la tête se baisse).
+function botShotWouldConnect(p, target){
+  const standOriginY = p.y + p.h * 0.42;
+  const crouchTopY = p.y + (p.h - PLAYER_CROUCH_HEIGHT);
+  const crouchOriginY = crouchTopY + PLAYER_CROUCH_HEIGHT * 0.42;
+  const top = target.y - 6, bottom = target.y + target.h + 6;
+  return {
+    standing: standOriginY > top && standOriginY < bottom,
+    crouched: crouchOriginY > top && crouchOriginY < bottom
+  };
 }
 
 function computeAutoPilotControls(p){
   const controls = {left:false,right:false,down:false,jump:false,shoot:false};
   if(!level || !p) return controls;
 
+  const mem = botMemory(p);
   const goalX = (level.goalX != null) ? level.goalX : (p.x + 200);
   const goalDir = (p.x + p.w/2 < goalX) ? 1 : -1;
   const boss = enemies.find(e => e.isBoss && e.alive);
@@ -1646,13 +1718,24 @@ function computeAutoPilotControls(p){
     }
   }
 
-  // ---- 2) Avancer vers l'objectif en franchissant murs, pics, ennemis et trous ----
-  controls.left = goalDir < 0;
-  controls.right = goalDir > 0;
+  // ---- 2) Pause de sécurité : on vient de tuer un ennemi observé, ou d'atteindre une nouvelle
+  // plateforme/tronçon de sol -> on s'arrête un court instant pour évaluer les environs avant de
+  // repartir, plutôt que de foncer sans réfléchir. La sécurité prime toujours sur la vitesse.
+  if(botDetectKill(p) && p.onGround) mem.holdUntil = frameTick + 45;
+  const curSolid = botCurrentSolid(p);
+  if(curSolid && mem.lastSolid && curSolid !== mem.lastSolid) mem.holdUntil = Math.max(mem.holdUntil, frameTick + 30);
+  if(curSolid) mem.lastSolid = curSolid;
+  const holding = frameTick < mem.holdUntil;
+
+  // ---- 3) Avancer vers l'objectif (sauf pause de sécurité en cours) en franchissant murs, pics,
+  // ennemis et trous — la marche s'arrête net dès qu'un franchissement est nécessaire ou qu'on
+  // observe une pause, mais le saut de sécurité reste toujours actif même à l'arrêt.
+  controls.left = !holding && goalDir < 0;
+  controls.right = !holding && goalDir > 0;
   const hz = botTerrainHazard(p, goalDir);
   if(p.onGround && hz.blocked) controls.jump = true;
 
-  // ---- 3) Esquiver les tirs hostiles (boss) sans se jeter dans un autre danger ----
+  // ---- 4) Esquiver les tirs hostiles (boss) sans se jeter dans un autre danger ----
   if(!controls.jump){
     const dodge = botProjectileDodge(p);
     if(dodge.jump && p.onGround) controls.jump = true;
@@ -1661,24 +1744,28 @@ function computeAutoPilotControls(p){
     }
   }
 
-  // ---- 4) Vigilance à 360° : dès qu'un ennemi (ou le boss) est détecté à portée, on riposte.
-  // On scrute tout l'environnement, pas seulement ce qu'il y a devant dans le sens de la marche :
-  // un ennemi qui approche par-derrière compte tout autant qu'un ennemi devant.
-  const nearest = botNearestThreat(p, 340);
+  // ---- 5) Vigilance sur toute la partie visible de l'écran : dès qu'un ennemi (ou le boss) est
+  // repéré, même loin ou dans le dos, on riposte — en anticipant son déplacement et en choisissant
+  // de s'accroupir si ça suffit à toucher, plutôt que de rester debout bêtement.
+  const nearest = botNearestThreat(p);
   if(nearest && !controls.jump){
-    const { dir: threatDir, dist } = nearest;
+    const { entity: target, dir: threatDir, dist } = nearest;
     const veryClose = dist < 70;
-    if(threatDir === goalDir){
-      // La menace est déjà dans le sens de la marche : on continue d'avancer en tirant devant soi.
-      controls.shoot = true;
-    } else if(veryClose){
-      // Elle est dans notre dos et sur le point de nous toucher : on se retourne une fraction de
-      // seconde pour l'abattre avant qu'elle ne morde, plutôt que de l'ignorer et prendre le coup.
-      controls.left = threatDir < 0; controls.right = threatDir > 0;
+    const shotFit = botShotWouldConnect(p, target);
+    if(threatDir === goalDir || veryClose){
+      if(veryClose && threatDir !== goalDir){
+        // Menace dans le dos, sur le point de mordre : on se retourne pour l'abattre avant qu'elle
+        // ne nous touche, plutôt que de l'ignorer et encaisser le coup.
+        controls.left = threatDir < 0; controls.right = threatDir > 0;
+      }
+      if(!shotFit.standing && shotFit.crouched && p.onGround && !hz.pitAhead){
+        // Debout on tirerait au-dessus/en dessous de la cible : s'accroupir suffit à la toucher.
+        controls.down = true; controls.left = false; controls.right = false;
+      }
       controls.shoot = true;
     }
-    // Sinon (menace lointaine dans notre dos) : on continue simplement d'avancer vers l'objectif,
-    // ce qui l'éloigne déjà — pas besoin de rebrousser chemin pour une cible qui n'est pas pressante.
+    // Sinon (menace lointaine, dans notre dos, pas pressante) : on continue simplement d'avancer
+    // vers l'objectif, ce qui l'éloigne déjà — pas besoin de rebrousser chemin pour si peu.
   } else if(boss && !controls.jump){
     const bcx = boss.x + boss.w/2, pcx = p.x + p.w/2;
     const facingBoss = (bcx > pcx && goalDir > 0) || (bcx < pcx && goalDir < 0);
