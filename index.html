@@ -357,12 +357,12 @@ const PLAYER_WIDTH = 42, PLAYER_HEIGHT = 76, PLAYER_CROUCH_HEIGHT = 46;
 const SHOOT_COOLDOWN = 20, PROJECTILE_SPEED = 11.5, PROJECTILE_LIFE = 70;
 
 const WORLD_THEMES = [
-  { name: "LA VILLE", bgTop: [18,14,38], bgBottom: [55,46,88], ground: [35,33,48], groundTop: [70,68,92], platform: [80,78,100], platformTop: [110,108,135], spike: [180,180,190], enemy: [25,25,25], accent: [60,140,255], deco: [32,26,53], clouds: [75,65,105] },
-  { name: "LE DÉSERT", bgTop: [245,160,80], bgBottom: [255,215,130], ground: [196,148,84], groundTop: [224,178,110], platform: [170,122,70], platformTop: [206,160,100], spike: [120,80,45], enemy: [150,90,40], accent: [230,140,40], deco: [160,110,60], clouds: [255,240,210] },
-  { name: "LA FORÊT", bgTop: [15,45,25], bgBottom: [45,95,55], ground: [60,90,45], groundTop: [90,130,60], platform: [100,75,50], platformTop: [60,140,70], spike: [90,60,40], enemy: [35,90,45], accent: [120,200,90], deco: [30,65,40], clouds: [80,120,95] },
-  { name: "LA BANQUISE", bgTop: [120,175,210], bgBottom: [200,225,240], ground: [180,210,225], groundTop: [235,245,255], platform: [150,185,210], platformTop: [215,230,245], spike: [130,180,210], enemy: [110,145,180], accent: [90,160,220], deco: [155,195,220], clouds: [235,245,250] },
-  { name: "LE VOLCAN", bgTop: [35,8,8], bgBottom: [110,28,14], ground: [42,24,20], groundTop: [78,38,24], platform: [55,30,22], platformTop: [92,48,26], spike: [255,110,40], enemy: [70,22,14], accent: [255,100,30], deco: [64,26,18], clouds: [95,55,45] },
-  { name: "LES ABYSSES", bgTop: [3,8,22], bgBottom: [8,32,64], ground: [14,28,42], groundTop: [22,50,70], platform: [18,42,56], platformTop: [30,66,84], spike: [70,220,205], enemy: [12,55,64], accent: [40,215,185], deco: [10,38,52], clouds: [20,68,88] },
+  { name: "LA VILLE", bgTop: [20,30,90], bgBottom: [70,130,235], ground: [35,33,48], groundTop: [70,68,92], platform: [80,78,100], platformTop: [110,108,135], spike: [180,180,190], enemy: [25,25,25], accent: [70,160,255], deco: [32,26,53], clouds: [255,255,255] },
+  { name: "LE DÉSERT", bgTop: [255,140,40], bgBottom: [255,220,110], ground: [196,148,84], groundTop: [224,178,110], platform: [170,122,70], platformTop: [206,160,100], spike: [120,80,45], enemy: [150,90,40], accent: [255,150,20], deco: [160,110,60], clouds: [255,250,225] },
+  { name: "LA FORÊT", bgTop: [10,70,35], bgBottom: [90,200,90], ground: [60,90,45], groundTop: [90,130,60], platform: [100,75,50], platformTop: [60,140,70], spike: [90,60,40], enemy: [35,90,45], accent: [130,230,80], deco: [30,65,40], clouds: [230,255,220] },
+  { name: "LA BANQUISE", bgTop: [90,170,235], bgBottom: [220,240,255], ground: [180,210,225], groundTop: [235,245,255], platform: [150,185,210], platformTop: [215,230,245], spike: [130,180,210], enemy: [110,145,180], accent: [80,180,255], deco: [155,195,220], clouds: [255,255,255] },
+  { name: "LE VOLCAN", bgTop: [40,5,5], bgBottom: [220,50,20], ground: [42,24,20], groundTop: [78,38,24], platform: [55,30,22], platformTop: [92,48,26], spike: [255,110,40], enemy: [70,22,14], accent: [255,120,20], deco: [64,26,18], clouds: [255,140,80] },
+  { name: "LES ABYSSES", bgTop: [2,6,30], bgBottom: [10,55,110], ground: [14,28,42], groundTop: [22,50,70], platform: [18,42,56], platformTop: [30,66,84], spike: [70,220,205], enemy: [12,55,64], accent: [50,235,205], deco: [10,38,52], clouds: [40,110,140] },
 ];
 
 const MUSIC = {
@@ -957,6 +957,34 @@ function roundRectPath(x, y, w, h, r){
   ctx.closePath();
 }
 
+function drawSpeedLines(cx, topY, botY, dir, speedRatio){
+  if(speedRatio < 0.55) return;
+  ctx.save();
+  ctx.strokeStyle = `rgba(255,255,255,${0.2+0.35*speedRatio})`;
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+  const len = 12 + 14*speedRatio;
+  for(let i=0;i<3;i++){
+    const yy = topY + (botY-topY)*(0.28+i*0.26);
+    ctx.beginPath();
+    ctx.moveTo(cx - dir*10, yy);
+    ctx.lineTo(cx - dir*(10+len), yy);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawGroundShadow(cx, footY, halfWidth){
+  ctx.save();
+  const grad = ctx.createRadialGradient(cx, footY, 0, cx, footY, halfWidth);
+  grad.addColorStop(0, 'rgba(0,0,0,0.38)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.ellipse(cx, footY, halfWidth, halfWidth*0.32, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawNameTag(cx, topY, name){
   if(!name) return;
   ctx.save();
@@ -1012,6 +1040,9 @@ function drawPlayerSprite(x, y, w, h, dir, vx, onGround, crouching, tick, charDe
   ctx.fillStyle = accent;
   ctx.fillRect(w*0.5-legW-legGap - swing*0.3, legTop, 4.5, legBot-legTop-7);
   ctx.fillRect(w*0.5+legGap+legW-4.5 + swing*0.3, legTop, 4.5, legBot-legTop-7);
+  ctx.strokeStyle = '#0c0c10'; ctx.lineWidth = 2;
+  ctx.strokeRect(w*0.5-legW-legGap - swing*0.3, legTop, legW, legBot-legTop-7);
+  ctx.strokeRect(w*0.5+legGap + swing*0.3, legTop, legW, legBot-legTop-7);
 
   const shoeY = legBot-9, shoeH = 9;
   [[w*0.5-legW-legGap-3 - swing*0.3, -1], [w*0.5+legGap-3 + swing*0.3, 1]].forEach(([sx, side])=>{
@@ -1041,6 +1072,7 @@ function drawPlayerSprite(x, y, w, h, dir, vx, onGround, crouching, tick, charDe
   ctx.fillStyle = torsoGrad;
   roundRectPath(w*0.5-w*0.42, torsoTop, w*0.84, torsoH, 6);
   ctx.fill();
+  ctx.strokeStyle = '#0c0c10'; ctx.lineWidth = 2.2; ctx.stroke();
   ctx.fillStyle = accent;
   ctx.fillRect(w*0.5+w*0.29, torsoTop, 6.5, torsoH);
   ctx.strokeStyle = '#0b0b0f'; ctx.lineWidth = 1.4;
@@ -1059,6 +1091,7 @@ function drawPlayerSprite(x, y, w, h, dir, vx, onGround, crouching, tick, charDe
   skinGrad.addColorStop(0, skin); skinGrad.addColorStop(1, skinShade);
   ctx.fillStyle = skinGrad;
   ctx.beginPath(); ctx.arc(headCX, headCY, headR, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#0c0c10'; ctx.lineWidth = 2; ctx.stroke();
 
   ctx.fillStyle = skin;
   ctx.beginPath(); ctx.arc(headCX-headR*0.98, headCY+headR*0.15, headR*0.22, 0, Math.PI*2); ctx.fill();
@@ -1553,6 +1586,8 @@ const LEVELS_PER_WORLD = LEVEL_NAMES.length;
 function FLAT(w, l){ return w * LEVELS_PER_WORLD + l; }
 
 let state = STATE_DEVICE, worldIndex = 0, levelIndex = 0, lives = 3, lives2 = 3, score = 0, cameraX = 0, levelTransitionTimer = 0, frameTick = 0;
+let screenShakeTimer = 0, screenShakeMag = 0;
+function triggerShake(mag, dur){ screenShakeMag = Math.max(screenShakeMag, mag); screenShakeTimer = Math.max(screenShakeTimer, dur); }
 
 const DEFAULT_KEYBINDS = { left: 'q', right: 'd', down: 's', jump: ' ', shoot: 'e' };
 let KEYBINDS = { ...DEFAULT_KEYBINDS };
@@ -2237,7 +2272,7 @@ const pseudoInput = document.getElementById('pseudoInput');
 const pseudoSaveBtn = document.getElementById('pseudoSaveBtn');
 const changeDeviceBtn = document.getElementById('changeDeviceBtn');
 const keybindSection = document.getElementById('keybindSection');
-const keybindButtons = Array.from(document.querySelectorAll('.keybindBtn'));
+const keybindButtons = Array.from(document.querySelectorAll('.keybindBtn[data-action]'));
 const resetKeybindsBtn = document.getElementById('resetKeybindsBtn');
 let rebindingAction = null;
 
@@ -2559,13 +2594,39 @@ function drawCharacterScreen(){
 function drawWorldDeco(worldIdx, camX) {
   const theme = WORLD_THEMES[worldIdx];
 
+  // Grand soleil/lune stylisé façon ciel d'animé, avec rayons qui tournent lentement
+  const sunX = mod(WIDTH*0.78 - camX*0.05, WIDTH + 200) - 60;
+  const sunY = 90;
+  const sunR = 46;
+  ctx.save();
+  const sunGlow = ctx.createRadialGradient(sunX, sunY, sunR*0.3, sunX, sunY, sunR*2.6);
+  sunGlow.addColorStop(0, `rgba(${theme.accent[0]},${theme.accent[1]},${theme.accent[2]},0.35)`);
+  sunGlow.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sunGlow;
+  ctx.beginPath(); ctx.arc(sunX, sunY, sunR*2.6, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = `rgba(255,255,255,0.55)`; ctx.lineWidth = 2.5;
+  for(let i=0;i<12;i++){
+    const ang = (i/12)*Math.PI*2 + frameTick*0.0015;
+    ctx.beginPath();
+    ctx.moveTo(sunX + Math.cos(ang)*sunR*1.15, sunY + Math.sin(ang)*sunR*1.15);
+    ctx.lineTo(sunX + Math.cos(ang)*sunR*1.7, sunY + Math.sin(ang)*sunR*1.7);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#fff8e0';
+  ctx.beginPath(); ctx.arc(sunX, sunY, sunR, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 3; ctx.stroke();
+  ctx.restore();
+
   ctx.fillStyle = rgb(theme.clouds);
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2;
   for (let i = 0; i < 6; i++) {
     let x = mod((i * 260 - camX * 0.1), WIDTH + 160) - 160;
     let y = 40 + (i % 3) * 30;
     ctx.fillRect(x, y + 10, 90, 20);
     ctx.fillRect(x + 15, y, 60, 25);
     ctx.fillRect(x + 35, y - 8, 30, 10);
+    ctx.strokeRect(x, y + 10, 90, 20);
+    ctx.strokeRect(x + 15, y, 60, 25);
   }
 
   ctx.fillStyle = rgb(theme.deco);
@@ -2780,6 +2841,7 @@ function damagePlayer(p){
   const isP2 = coopMode && p === player2;
   // Vies individuelles : chaque joueur a son propre capital de vies, plus de pot commun d'équipe.
   if((isP2 ? lives2 : lives) <= 0) return; // déjà éliminé, rien à faire
+  triggerShake(6, 14);
   livesLostThisLevel++;
   livesLostThisWorld++;
   if(isP2){
@@ -3108,6 +3170,7 @@ function gameLoop(){
 
 function gameLoopBody(){
   frameTick++;
+  if(screenShakeTimer > 0){ screenShakeTimer--; if(screenShakeTimer <= 0) screenShakeMag = 0; }
   const settingsAreOpen = settingsOverlay && !settingsOverlay.classList.contains('hidden');
   if(state === STATE_PLAYING && frameTick % 120 === 0 && !onlineMode) saveGame();
 
@@ -3162,6 +3225,7 @@ function gameLoopBody(){
         if(rectsOverlap(p.rect, e.rect)){
           if(p.vy > 0 && p.y + p.h - p.vy <= e.y + 15){
             e.hit(); p.vy = -10;
+            triggerShake(e.isBoss ? 9 : 3, e.isBoss ? 16 : 8);
             score += e.alive ? 1 : (e.isBoss ? 20 : 2);
             if(!e.alive) enemiesDefeatedAllTime++; if(e.isBoss && !e.alive) bossesDefeated++;
           } else if(p.invincibleTimer <= 0 && !isInSpawnZone(p)){ damagePlayer(p); }
@@ -3177,6 +3241,7 @@ function gameLoopBody(){
         if(!p.dead && rectsOverlap(p.rect, e.rect)){
           p.dead = true;
           e.hit();
+          triggerShake(e.isBoss ? 7 : 2, e.isBoss ? 14 : 6);
           score += e.alive ? 1 : (e.isBoss ? 20 : 2);
           if(!e.alive) enemiesDefeatedAllTime++; if(e.isBoss && !e.alive) bossesDefeated++;
           break;
@@ -3279,7 +3344,18 @@ function gameLoopBody(){
         }
       });
       ctx.fillStyle = rgb(theme.spike); level.spikes.forEach(r => { for(let x=r.x; x<r.x+r.w; x+=20){ ctx.beginPath(); ctx.moveTo(x, r.y+r.h); ctx.lineTo(x+10, r.y); ctx.lineTo(x+20, r.y+r.h); ctx.fill(); } });
-      level.coins.forEach(c => { if(!c.taken){ drawStar(c.x, c.y, 10, 4.5, '#ffd700'); drawStar(c.x, c.y, 6, 2.5, '#fff6b0'); } });
+      level.coins.forEach(c => {
+        if(c.taken) return;
+        const pulse = 0.55 + 0.25*Math.sin(frameTick*0.08 + c.x*0.05);
+        ctx.save();
+        const glow = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, 16);
+        glow.addColorStop(0, `rgba(255,215,0,${0.32*pulse})`);
+        glow.addColorStop(1, 'rgba(255,215,0,0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath(); ctx.arc(c.x, c.y, 16, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+        drawStar(c.x, c.y, 10, 4.5, '#ffd700'); drawStar(c.x, c.y, 6, 2.5, '#fff6b0');
+      });
       projectiles.forEach(p => {
         ctx.save();
         ctx.fillStyle = p.color;
@@ -3292,6 +3368,22 @@ function gameLoopBody(){
       });
       enemies.forEach(e => {
         if(!e.alive) return;
+        drawGroundShadow(e.x + e.w/2, e.y + e.h - 3, e.w*0.5);
+        if(e.hitFlash > 0){
+          const ecx = e.x + e.w/2, ecy = e.y + e.h/2;
+          ctx.save();
+          ctx.strokeStyle = `rgba(255,255,255,${e.hitFlash/10})`;
+          ctx.lineWidth = 2.5;
+          for(let i=0;i<6;i++){
+            const ang = (i/6)*Math.PI*2;
+            const r1 = Math.max(e.w,e.h)*0.55, r2 = r1 + 10 + e.hitFlash;
+            ctx.beginPath();
+            ctx.moveTo(ecx+Math.cos(ang)*r1, ecy+Math.sin(ang)*r1);
+            ctx.lineTo(ecx+Math.cos(ang)*r2, ecy+Math.sin(ang)*r2);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
         ctx.save();
         if(e.hitFlash > 0) ctx.globalAlpha = 0.55;
         if(e.isBoss) drawBossSprite(e.kind, e.x, e.y, e.w, e.h, frameTick, e.dir);
@@ -3326,6 +3418,8 @@ function gameLoopBody(){
             const p = onlineHostPlayers[id];
             const meta = onlineMeta[id] || {charId:'zkr', slot:0, name:'Joueur'};
             const charDef = getCharacterTinted(meta.charId, ONLINE_TINTS[meta.slot % ONLINE_TINTS.length]);
+            drawGroundShadow(p.x - camX + p.w/2, p.y + p.h - 3, p.w*0.55);
+            if(p.onGround) drawSpeedLines(p.x - camX + p.w/2, p.y, p.y+p.h, p.facing, Math.min(Math.abs(p.vx)/MOVE_SPEED,1));
             if(p.invincibleTimer <= 0 || p.invincibleTimer % 8 < 5){
               drawPlayerSprite(p.x - camX, p.y, p.w, p.h, p.facing, p.vx, p.onGround, p.h === PLAYER_CROUCH_HEIGHT, frameTick, charDef);
             }
@@ -3339,6 +3433,8 @@ function gameLoopBody(){
               // générique ci-dessous qui dessine la position figée reçue de l'hôte.)
               const meta = onlineMeta[myId] || {charId: currentCharacterId, slot: 0, name: playerName};
               const charDef = getCharacterTinted(meta.charId || currentCharacterId, ONLINE_TINTS[meta.slot % ONLINE_TINTS.length]);
+              drawGroundShadow(myPredPlayer.x - camX + myPredPlayer.w/2, myPredPlayer.y + myPredPlayer.h - 3, myPredPlayer.w*0.55);
+              if(myPredPlayer.onGround) drawSpeedLines(myPredPlayer.x - camX + myPredPlayer.w/2, myPredPlayer.y, myPredPlayer.y+myPredPlayer.h, myPredPlayer.facing, Math.min(Math.abs(myPredPlayer.vx)/MOVE_SPEED,1));
               if(myPredPlayer.invincibleTimer <= 0 || myPredPlayer.invincibleTimer % 8 < 5){
                 drawPlayerSprite(myPredPlayer.x - camX, myPredPlayer.y, myPredPlayer.w, myPredPlayer.h, myPredPlayer.facing, myPredPlayer.vx, myPredPlayer.onGround, myPredPlayer.h === PLAYER_CROUCH_HEIGHT, frameTick, charDef);
               }
@@ -3347,8 +3443,11 @@ function gameLoopBody(){
             }
             const ps = renderPlayers[id] || remoteSnapshot.players[id];
             const charDef = getCharacterTinted(ps.charId || 'zkr', ONLINE_TINTS[(ps.slot||0) % ONLINE_TINTS.length]);
+            const psH = ps.crouch ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT;
+            drawGroundShadow(ps.x - camX + PLAYER_WIDTH/2, ps.y + psH - 3, PLAYER_WIDTH*0.55);
+            if(ps.onGround) drawSpeedLines(ps.x - camX + PLAYER_WIDTH/2, ps.y, ps.y+psH, ps.facing, Math.min(Math.abs(ps.vx)/MOVE_SPEED,1));
             if(!ps.inv || frameTick % 8 < 5){
-              drawPlayerSprite(ps.x - camX, ps.y, PLAYER_WIDTH, ps.crouch ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT, ps.facing, ps.vx, ps.onGround, ps.crouch, frameTick, charDef);
+              drawPlayerSprite(ps.x - camX, ps.y, PLAYER_WIDTH, psH, ps.facing, ps.vx, ps.onGround, ps.crouch, frameTick, charDef);
             }
             const psName = (onlineMeta[id] && onlineMeta[id].name) || 'Joueur';
             drawNameTag(ps.x - camX + PLAYER_WIDTH/2, ps.y, DEBUG_SHOW_COORDS ? `${psName} [x:${Math.round(ps.x)}]` : psName);
@@ -3359,6 +3458,8 @@ function gameLoopBody(){
           ? [{p: player, char: getCharacter(currentCharacterId), name: playerName}, {p: player2, char: getCharacterP2(), name: 'Joueur 2'}]
           : [{p: player, char: getCharacter(currentCharacterId), name: playerName}];
         drawables.forEach(({p, char, name}) => {
+          drawGroundShadow(p.x - camX + p.w/2, p.y + p.h - 3, p.w*0.55);
+          if(p.onGround) drawSpeedLines(p.x - camX + p.w/2, p.y, p.y+p.h, p.facing, Math.min(Math.abs(p.vx)/MOVE_SPEED,1));
           if(p.invincibleTimer <= 0 || p.invincibleTimer % 8 < 5){
             drawPlayerSprite(p.x - camX, p.y, p.w, p.h, p.facing, p.vx, p.onGround, p.h === PLAYER_CROUCH_HEIGHT, frameTick, char);
           }
@@ -3369,6 +3470,14 @@ function gameLoopBody(){
       ctx.restore();
     };
 
+    let shakeX = 0, shakeY = 0;
+    if(screenShakeTimer > 0){
+      const shakeFalloff = screenShakeTimer / 16;
+      shakeX = (Math.random()*2-1) * screenShakeMag * shakeFalloff;
+      shakeY = (Math.random()*2-1) * screenShakeMag * shakeFalloff;
+    }
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
     if(coopMode && !onlineMode){
       ctx.fillStyle = '#000'; ctx.fillRect(0,0,WIDTH,HEIGHT);
       drawGameViewport(0, WIDTH/2, cameraX);
@@ -3377,8 +3486,23 @@ function gameLoopBody(){
     } else {
       drawGameViewport(0, WIDTH, cameraX);
     }
+    ctx.restore();
 
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,WIDTH,50); ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial';
+    // Léger vignettage pour donner de la profondeur à la scène, sans gêner la lisibilité au centre
+    ctx.save();
+    const vignette = ctx.createRadialGradient(WIDTH/2, HEIGHT/2, HEIGHT*0.42, WIDTH/2, HEIGHT/2, HEIGHT*0.9);
+    vignette.addColorStop(0, 'rgba(0,0,0,0)');
+    vignette.addColorStop(1, 'rgba(0,0,0,0.32)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0,0,WIDTH,HEIGHT);
+    ctx.restore();
+
+    let hudGrad = ctx.createLinearGradient(0,0,0,50);
+    hudGrad.addColorStop(0, 'rgba(10,8,20,0.75)'); hudGrad.addColorStop(1, 'rgba(10,8,20,0.25)');
+    ctx.fillStyle = hudGrad; ctx.fillRect(0,0,WIDTH,50);
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0,50); ctx.lineTo(WIDTH,50); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial';
     if(onlineMode){
       const nbPlayers = isHost ? Object.keys(onlineHostPlayers).length : (remoteSnapshot && remoteSnapshot.players ? Object.keys(remoteSnapshot.players).length : 1);
       const myOnlineLives = isHost ? (onlinePlayerLives[myId] ?? 0) : lives;
