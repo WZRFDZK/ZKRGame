@@ -2811,9 +2811,15 @@ function ensureHostPlayer(id){
   if(onlinePlayerLives[id] == null) onlinePlayerLives[id] = 3; // vies propres à chaque joueur connecté
 }
 
+const ONLINE_INPUT_STALE_MS = 350; // au-delà, on considère l'invité "gelé" (onglet en arrière-plan, coupure réseau...) et on arrête son perso plutôt que de le laisser courir seul vers un trou
 function getOnlineControlsFor(id){
   if(id === myId) return controlsP1();
-  return remoteInputs[id] || {left:false,right:false,down:false,jump:false,shoot:false};
+  const inp = remoteInputs[id];
+  if(!inp) return {left:false,right:false,down:false,jump:false,shoot:false};
+  if(inp.t != null && (Date.now() - inp.t) > ONLINE_INPUT_STALE_MS){
+    return {left:false,right:false,down:false,jump:false,shoot:false};
+  }
+  return inp;
 }
 
 function updateOnlineHost(){
@@ -2978,7 +2984,7 @@ function damagePlayerOnline(id){
 function updateOnlineGuest(){
   if(frameTick - lastOnlineSendTick >= ONLINE_INPUT_SEND_INTERVAL && onlineInputsRef){
     lastOnlineSendTick = frameTick;
-    onlineInputsRef.child(myId).set(controlsP1()).catch(() => {});
+    onlineInputsRef.child(myId).set({...controlsP1(), t: Date.now()}).catch(() => {});
   }
   if(!remoteSnapshot) return;
   ensureOnlineLevel(remoteSnapshot.world, remoteSnapshot.level);
