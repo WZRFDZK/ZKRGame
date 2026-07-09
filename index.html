@@ -1905,7 +1905,8 @@ function ensureOnlineLevel(w, l){
   }));
   if(!isHost){
     if(!myPredPlayer) myPredPlayer = new Player();
-    myPredPlayer.reset(level.startX, level.startY);
+    const mySlot = (onlineMeta[myId] && onlineMeta[myId].slot) || 0;
+    myPredPlayer.reset(level.startX + mySlot*40, level.startY);
   }
 }
 let stateBeforeDevice = STATE_MENU;
@@ -2783,7 +2784,7 @@ function damagePlayer(p){
   livesLostThisWorld++;
   if(isP2){
     lives2--;
-    if(lives2 <= 0){ lives2 = 0; } else { p.reset(level.startX, level.startY); }
+    if(lives2 <= 0){ lives2 = 0; } else { p.reset(level.startX + 40, level.startY); }
   } else {
     lives--;
     if(lives <= 0){ lives = 0; } else { p.reset(level.startX, level.startY); }
@@ -2960,7 +2961,7 @@ function damagePlayerOnline(id){
   livesLostThisWorld++;
   onlinePlayerLives[id]--;
   if(onlinePlayerLives[id] <= 0){ onlinePlayerLives[id] = 0; }
-  else { p.reset(level.startX, level.startY); }
+  else { const slot = (onlineMeta[id] && onlineMeta[id].slot) || 0; p.reset(level.startX + slot*40, level.startY); }
   // Game over du salon seulement quand TOUS les joueurs connectés ont perdu toutes leurs vies.
   const ids = Object.keys(onlineHostPlayers);
   if(ids.length > 0 && ids.every(pid => (onlinePlayerLives[pid] ?? 0) <= 0)){
@@ -3069,7 +3070,8 @@ function updateOnlineGuest(){
     });
   }
   if(lastKnownLives != null && lives < lastKnownLives && myPredPlayer && level){
-    myPredPlayer.reset(level.startX, level.startY);
+    const mySlot = (onlineMeta[myId] && onlineMeta[myId].slot) || 0;
+    myPredPlayer.reset(level.startX + mySlot*40, level.startY);
   }
   lastKnownLives = lives;
 
