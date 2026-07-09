@@ -1686,7 +1686,7 @@ let onlineHostPlayers = {};
 let remoteSnapshot = null;
 let renderPlayers = {}; // positions lissées (invité) pour les AUTRES joueurs (pas de prédiction possible, on n'a pas leurs touches)
 let lastRemoteSnapshotT = null; // sert à détecter précisément l'arrivée d'un NOUVEAU paquet réseau (vs la même donnée relue plusieurs frames de suite)
-const DEBUG_SHOW_COORDS = false; // affiche la coordonnée X monde réelle de chaque joueur sous son pseudo, en ligne — utile pour vérifier objectivement la synchro entre plusieurs fenêtres (repassé à false, tests terminés)
+const DEBUG_SHOW_COORDS = true; // affiche la coordonnée X monde réelle de chaque joueur sous son pseudo, en ligne — utile pour vérifier objectivement la synchro entre plusieurs fenêtres (à repasser à false une fois les tests terminés)
 let myPredPlayer = null; // instance Player simulée localement à 60 fps chez l'invité, pour SON PROPRE personnage (prédiction côté client)
 let lastKnownLives = null; // sert à détecter une perte de vie (dégâts/mort) pour recaler le perso prédit, sans comparer de positions
 let onlineWorld = 0, onlineLevel = 0;
