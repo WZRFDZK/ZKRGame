@@ -2167,18 +2167,10 @@ function onKeyPress(key){
     else if(key === 'm' || key === 'M') openMap(false);
     else if(key === 'c' || key === 'C') openCharacterSelect(false);
   } else if(state === STATE_GAME_OVER){
-    // En ligne, seul l'hôte fait autorité sur le monde/niveau : si l'invité relançait la partie
-    // en local ici, ça régénérait un niveau chez lui avec des indices désynchronisés du tracking
-    // réseau (onlineWorld/onlineLevel) sans que l'hôte le sache — son perso prédit se mettait alors
-    // à tourner sur un niveau différent de celui simulé par l'hôte, qui reste seul juge des
-    // dégâts/de la mort : ça donnait l'impression de "mourir pour rien". L'invité attend donc
-    // simplement le prochain instantané de l'hôte (qui, lui, peut relancer).
-    if(onlineMode && !isHost) { /* no-op côté invité */ }
-    else if(key === ' ') respawnAtCheckpoint();
+    if(key === ' ') respawnAtCheckpoint();
     else if(key === 'm' || key === 'M') openMap(false);
   } else if(state === STATE_VICTORY){
-    if(onlineMode && !isHost) { /* no-op côté invité, voir STATE_GAME_OVER */ }
-    else if(key === ' ') startNewGame();
+    if(key === ' ') startNewGame();
     else if(key === 'm' || key === 'M') openMap(false);
   } else if(state === STATE_PLAYING){
     if(onlineMode && amIEliminated() && (key === 'ArrowLeft' || key === KEYBINDS.left)) cycleSpectateTarget(-1);
@@ -2186,10 +2178,7 @@ function onKeyPress(key){
     else if(key === 'Escape') openMap(true);
     else if(key === 'c' || key === 'C') openCharacterSelect(true);
   } else if(state === STATE_LEVEL_CLEAR){
-    // Même raison qu'au-dessus (STATE_GAME_OVER) : avancer de niveau doit rester une décision
-    // exclusive de l'hôte en ligne, sinon l'invité désynchronise son propre niveau local.
-    if(onlineMode && !isHost) { /* no-op côté invité */ }
-    else if(key === ' ' || key === 'Enter') advanceAfterLevelClear();
+    if(key === ' ' || key === 'Enter') advanceAfterLevelClear();
     else if(key === 'r' || key === 'R' || key === 'e' || key === 'E') retryCurrentLevel();
     else if(key === 'm' || key === 'M' || key === 'Escape') openMap(false);
   } else if(state === STATE_MAP){
@@ -2197,9 +2186,7 @@ function onKeyPress(key){
     else if(key === 'ArrowRight') mapCursorLevel = Math.min(LEVELS_PER_WORLD - 1, mapCursorLevel + 1);
     else if(key === 'ArrowUp') mapCursorWorld = Math.max(0, mapCursorWorld - 1);
     else if(key === 'ArrowDown') mapCursorWorld = Math.min(WORLD_THEMES.length - 1, mapCursorWorld + 1);
-    // Idem : lancer un niveau depuis la carte doit rester une action hôte en ligne, pour la
-    // même raison de désynchronisation world/level décrite plus haut.
-    else if((key === ' ' || key === 'Enter') && !(onlineMode && !isHost)) tryLaunchFromMap();
+    else if(key === ' ' || key === 'Enter') tryLaunchFromMap();
     else if(key === 'Escape') state = mapReturnsToPlay ? STATE_PLAYING : STATE_MENU;
   } else if(state === STATE_CHARACTER){
     if(key === 'ArrowLeft') charCursor = Math.max(0, charCursor - 1);
