@@ -470,6 +470,63 @@ const CHARACTERS = [
     palette: { skin:'#c9884f', skinShade:'#a8703f', hoodie:'#3a1408', hoodieLight:'#6e2a10', accent:'#ff6a1c', accentLight:'#ffb066', hair:'#1c1008', hairHi:'#3a2010', shoeWhite:'#ffe4c8', shoeBlack:'#2a1408', silver:'#ffcf9c' },
     quest: 'Termine un monde entier sans jamais perdre une seule vie.',
     isUnlocked: () => flawlessWorldsCount >= 1
+  },
+  // ----- Île Pirate (monde 7, index 6) -----
+  {
+    id: 'joker', name: 'CAPITAINE JOKER', theme: "L'Île Pirate", accessory: 'strawhat',
+    palette: { skin:'#c9884f', skinShade:'#a8703f', hoodie:'#c0202a', hoodieLight:'#e0424c', accent:'#f2c14e', accentLight:'#ffe08a', hair:'#1c1008', hairHi:'#3a2010', shoeWhite:'#f1f5fa', shoeBlack:'#15151a', silver:'#e9e9ee' },
+    quest: 'Bats le boss de L\'ÎLE PIRATE et deviens capitaine des lieux.',
+    isUnlocked: () => worldsCompletedCount >= 7
+  },
+  {
+    id: 'ryu', name: 'RYU LE SABREUR', theme: "L'Île Pirate", accessory: 'headband',
+    palette: { skin:'#e3b48f', skinShade:'#c4926c', hoodie:'#0f3d2e', hoodieLight:'#1d6b4f', accent:'#e8d9b0', accentLight:'#fff3d0', hair:'#123524', hairHi:'#1f5c3d', shoeWhite:'#e9e9ee', shoeBlack:'#15151a', silver:'#c7d6de' },
+    quest: 'Élimine 40 pirates rivaux sur L\'ÎLE PIRATE.',
+    isUnlocked: () => enemiesDefeatedPerWorld[6] >= 40
+  },
+  {
+    id: 'marina', name: 'MARINA', theme: "L'Île Pirate", accessory: 'tricorn',
+    palette: { skin:'#e8b98a', skinShade:'#c99968', hoodie:'#ff7a1c', hoodieLight:'#ffab5c', accent:'#2f6fe0', accentLight:'#7ba8f5', hair:'#d97a1c', hairHi:'#ffab4a', shoeWhite:'#f1f5fa', shoeBlack:'#15151a', silver:'#e9e9ee' },
+    quest: 'Déniche 30 pièces de trésor sur L\'ÎLE PIRATE.',
+    isUnlocked: () => coinsCollectedPerWorld[6] >= 30
+  },
+  // ----- Archipel Céleste (monde 8, index 7) -----
+  {
+    id: 'azur', name: 'AZUR', theme: "L'Archipel Céleste", accessory: 'wings',
+    palette: { skin:'#c9a37c', skinShade:'#a8825f', hoodie:'#eaf2ff', hoodieLight:'#ffffff', accent:'#5fc8ff', accentLight:'#bfe8ff', hair:'#2a4a6a', hairHi:'#4a6a8a', shoeWhite:'#f1f5fa', shoeBlack:'#2a3a4a', silver:'#dfe9f5' },
+    quest: 'Atteins le sommet de L\'ARCHIPEL CÉLESTE en battant son boss.',
+    isUnlocked: () => worldsCompletedCount >= 8
+  },
+  {
+    id: 'solara', name: 'SOLARA', theme: "L'Archipel Céleste", accessory: 'halo',
+    palette: { skin:'#e8c9a0', skinShade:'#c9a878', hoodie:'#fff6d8', hoodieLight:'#ffffff', accent:'#ffd23c', accentLight:'#fff0a0', hair:'#fff0c0', hairHi:'#fffbe6', shoeWhite:'#fff6d8', shoeBlack:'#e8c96a', silver:'#ffe98a' },
+    quest: 'Obtiens 3 étoiles sur 3 niveaux de L\'ARCHIPEL CÉLESTE.',
+    isUnlocked: () => perfectLevelsPerWorld[7] >= 3
+  },
+  {
+    id: 'zefyr', name: 'ZEFYR', theme: "L'Archipel Céleste", accessory: 'guardhelm',
+    palette: { skin:'#c9884f', skinShade:'#a8703f', hoodie:'#3a4a6a', hoodieLight:'#5a7aa8', accent:'#ffd23c', accentLight:'#fff0a0', hair:'#1c1c22', hairHi:'#3a3a44', shoeWhite:'#dfe9f5', shoeBlack:'#1c1c22', silver:'#e9e9ee' },
+    quest: 'Élimine 40 gardiens du ciel sur L\'ARCHIPEL CÉLESTE.',
+    isUnlocked: () => enemiesDefeatedPerWorld[7] >= 40
+  },
+  // ----- Pays des Sabres (monde 9, index 8) -----
+  {
+    id: 'kage', name: 'KAGE', theme: 'Le Pays des Sabres', accessory: 'headband',
+    palette: { skin:'#c9a37c', skinShade:'#a8825f', hoodie:'#1c2540', hoodieLight:'#2f3f66', accent:'#8a1414', accentLight:'#c94a3d', hair:'#151018', hairHi:'#241a26', shoeWhite:'#e9e9ee', shoeBlack:'#15151a', silver:'#c7d6de' },
+    quest: 'Bats le boss de LE PAYS DES SABRES.',
+    isUnlocked: () => worldsCompletedCount >= 9
+  },
+  {
+    id: 'hanzo', name: 'HANZO', theme: 'Le Pays des Sabres', accessory: 'mask',
+    palette: { skin:'#e3b48f', skinShade:'#c4926c', hoodie:'#101010', hoodieLight:'#2a2a2a', accent:'#c94a3d', accentLight:'#ff7a63', hair:'#0d0d0d', hairHi:'#1e1e1e', shoeWhite:'#c7d6de', shoeBlack:'#0a0a0a', silver:'#e9e9ee' },
+    quest: 'Termine LE PAYS DES SABRES sans perdre une seule vie.',
+    isUnlocked: () => flawlessByWorld[8]
+  },
+  {
+    id: 'oni', name: "L'OMBRE DU SHOGUN", theme: 'Le Pays des Sabres', accessory: 'kabuto',
+    palette: { skin:'#a8703f', skinShade:'#8a5a30', hoodie:'#1c0e18', hoodieLight:'#3a1c30', accent:'#ff5078', accentLight:'#ff9ab0', hair:'#0a0a0a', hairHi:'#1a0a12', shoeWhite:'#3a1c30', shoeBlack:'#0a0405', silver:'#ffb0c0' },
+    quest: 'Élimine 60 ronins sur LE PAYS DES SABRES et deviens l\'ombre du Shogun.',
+    isUnlocked: () => enemiesDefeatedPerWorld[8] >= 60
   }
 ];
 function getCharacter(id){ return CHARACTERS.find(c => c.id === id) || CHARACTERS[0]; }
@@ -1198,6 +1255,69 @@ function drawPlayerSprite(x, y, w, h, dir, vx, onGround, crouching, tick, charDe
     ctx.lineTo(w*0.5+w*0.55+flap, torsoTop+headR*0.9);
     ctx.lineTo(w*0.5+w*0.32, torsoTop+headR*0.55);
     ctx.closePath(); ctx.fill();
+  } else if(accessory === 'strawhat'){
+    // Chapeau de paille de capitaine pirate
+    ctx.fillStyle = '#e8c96a';
+    ctx.beginPath(); ctx.ellipse(headCX, headCY-headR*0.75, headR*1.5, headR*0.32, 0, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#c9a94a'; ctx.lineWidth = 1.6; ctx.stroke();
+    ctx.fillStyle = '#f2dc8a';
+    ctx.beginPath(); ctx.ellipse(headCX, headCY-headR*1.05, headR*0.72, headR*0.55, 0, Math.PI, Math.PI*2); ctx.fill();
+    ctx.fillStyle = pal.accent;
+    ctx.fillRect(headCX-headR*0.72, headCY-headR*0.98, headR*1.44, headR*0.2);
+  } else if(accessory === 'tricorn'){
+    // Bicorne d'officier pirate avec plume
+    ctx.fillStyle = '#151018';
+    ctx.beginPath();
+    ctx.moveTo(headCX-headR*1.05, headCY-headR*0.5);
+    ctx.quadraticCurveTo(headCX-headR*0.3, headCY-headR*1.5, headCX, headCY-headR*0.85);
+    ctx.quadraticCurveTo(headCX+headR*0.3, headCY-headR*1.5, headCX+headR*1.05, headCY-headR*0.5);
+    ctx.quadraticCurveTo(headCX, headCY-headR*0.65, headCX-headR*1.05, headCY-headR*0.5);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = pal.accent; ctx.lineWidth = 1.8; ctx.stroke();
+    ctx.fillStyle = pal.accentLight;
+    ctx.beginPath();
+    ctx.moveTo(headCX+headR*0.5, headCY-headR*1.1);
+    ctx.quadraticCurveTo(headCX+headR*0.95, headCY-headR*1.5, headCX+headR*0.72, headCY-headR*1.8);
+    ctx.quadraticCurveTo(headCX+headR*0.6, headCY-headR*1.35, headCX+headR*0.5, headCY-headR*1.1);
+    ctx.fill();
+  } else if(accessory === 'wings'){
+    // Petites ailes de plumes dans le dos, façon voyageur du ciel
+    const flap = Math.sin(tick*0.3)*5;
+    ctx.fillStyle = pal.accentLight;
+    ctx.beginPath();
+    ctx.moveTo(w*0.5-w*0.05, torsoTop+headR*0.3);
+    ctx.quadraticCurveTo(w*0.5-w*0.5, torsoTop+headR*0.1+flap, w*0.5-w*0.35, torsoTop+headR*0.9);
+    ctx.quadraticCurveTo(w*0.5-w*0.2, torsoTop+headR*0.5, w*0.5-w*0.05, torsoTop+headR*0.3);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(w*0.5+w*0.05, torsoTop+headR*0.3);
+    ctx.quadraticCurveTo(w*0.5+w*0.5, torsoTop+headR*0.1-flap, w*0.5+w*0.35, torsoTop+headR*0.9);
+    ctx.quadraticCurveTo(w*0.5+w*0.2, torsoTop+headR*0.5, w*0.5+w*0.05, torsoTop+headR*0.3);
+    ctx.fill();
+  } else if(accessory === 'halo'){
+    // Anneau doré flottant façon prêtresse céleste
+    const bobH = Math.sin(tick*0.15)*2;
+    ctx.fillStyle = 'rgba(255,225,90,0.3)';
+    ctx.beginPath(); ctx.ellipse(headCX, headCY-headR*1.55+bobH, headR*0.62, headR*0.18, 0, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = pal.accent; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(headCX, headCY-headR*1.55+bobH, headR*0.62, headR*0.18, 0, 0, Math.PI*2); ctx.stroke();
+  } else if(accessory === 'guardhelm'){
+    // Casque de sentinelle ailé, trim doré
+    ctx.fillStyle = pal.hoodie;
+    ctx.beginPath(); ctx.arc(headCX, headCY-headR*0.1, headR*1.05, Math.PI*1.05, Math.PI*1.95); ctx.fill();
+    ctx.fillStyle = pal.accent;
+    ctx.fillRect(headCX-headR*0.15, headCY-headR*1.05, headR*0.3, headR*0.3);
+    ctx.beginPath(); ctx.moveTo(headCX-headR*1.0, headCY-headR*0.2); ctx.lineTo(headCX-headR*1.5, headCY-headR*0.5); ctx.lineTo(headCX-headR*0.95, headCY+headR*0.05); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(headCX+headR*1.0, headCY-headR*0.2); ctx.lineTo(headCX+headR*1.5, headCY-headR*0.5); ctx.lineTo(headCX+headR*0.95, headCY+headR*0.05); ctx.closePath(); ctx.fill();
+  } else if(accessory === 'kabuto'){
+    // Casque de samouraï à cornes, façon ombre du shogun
+    ctx.fillStyle = '#0e0810';
+    ctx.beginPath(); ctx.arc(headCX, headCY-headR*0.15, headR*1.02, Math.PI*1.0, Math.PI*2.0); ctx.fill();
+    ctx.strokeStyle = pal.accent; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(headCX-headR*0.9, headCY-headR*0.7); ctx.quadraticCurveTo(headCX-headR*1.4, headCY-headR*1.5, headCX-headR*0.6, headCY-headR*1.7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(headCX+headR*0.9, headCY-headR*0.7); ctx.quadraticCurveTo(headCX+headR*1.4, headCY-headR*1.5, headCX+headR*0.6, headCY-headR*1.7); ctx.stroke();
+    ctx.fillStyle = pal.accent;
+    ctx.beginPath(); ctx.arc(headCX, headCY-headR*0.55, headR*0.16, 0, Math.PI*2); ctx.fill();
   }
 
   ctx.restore();
@@ -2159,6 +2279,17 @@ let perfectLevelsCount = 0;
 let flawlessWorldsCount = 0;
 let livesLostThisWorld = 0;
 
+// Suivi par monde (utilisé pour les quêtes de déblocage de skins liées à un monde précis)
+let enemiesDefeatedPerWorld = new Array(WORLD_THEMES.length).fill(0);
+let coinsCollectedPerWorld = new Array(WORLD_THEMES.length).fill(0);
+let perfectLevelsPerWorld = new Array(WORLD_THEMES.length).fill(0);
+let flawlessByWorld = new Array(WORLD_THEMES.length).fill(false);
+function normalizeWorldArray(arr){
+  const out = new Array(WORLD_THEMES.length).fill(0);
+  if(Array.isArray(arr)) for(let i=0;i<Math.min(arr.length, out.length);i++) out[i] = arr[i] || 0;
+  return out;
+}
+
 let livesLostThisLevel = 0;
 let levelClearStars = 3, levelClearCoins = 0, levelClearCoinsTotal = 0;
 
@@ -2217,6 +2348,7 @@ function saveGame(){
       musicEnabled, musicVolume, KEYBINDS, coopMode,
       totalCoinsAllTime, bossesDefeated, worldsCompletedCount, victoriesCount,
       enemiesDefeatedAllTime, perfectLevelsCount, flawlessWorldsCount, livesLostThisWorld,
+      enemiesDefeatedPerWorld, coinsCollectedPerWorld, perfectLevelsPerWorld, flawlessByWorld,
       resumeState: (state === STATE_PLAYING) ? 'playing' : 'menu'
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -2255,6 +2387,10 @@ function applySavedData(d){
   perfectLevelsCount = d.perfectLevelsCount ?? 0;
   flawlessWorldsCount = d.flawlessWorldsCount ?? 0;
   livesLostThisWorld = d.livesLostThisWorld ?? 0;
+  enemiesDefeatedPerWorld = normalizeWorldArray(d.enemiesDefeatedPerWorld);
+  coinsCollectedPerWorld = normalizeWorldArray(d.coinsCollectedPerWorld);
+  perfectLevelsPerWorld = normalizeWorldArray(d.perfectLevelsPerWorld);
+  flawlessByWorld = Array.isArray(d.flawlessByWorld) ? WORLD_THEMES.map((_, i) => !!d.flawlessByWorld[i]) : new Array(WORLD_THEMES.length).fill(false);
 }
 
 function initLevel(){
@@ -2273,7 +2409,7 @@ function initLevel(){
 function advanceAfterLevelClear(){
   levelIndex++;
   if(levelIndex >= LEVELS_PER_WORLD){
-    if(livesLostThisWorld === 0) flawlessWorldsCount++;
+    if(livesLostThisWorld === 0){ flawlessWorldsCount++; flawlessByWorld[worldIndex] = true; }
     livesLostThisWorld = 0;
     levelIndex = 0; worldIndex++; worldsCompletedCount++;
     if(worldIndex >= WORLD_THEMES.length){
@@ -3247,7 +3383,7 @@ function updateOnlineHost(){
     if(c.taken) return;
     for(const id of activeIds){
       const p = onlineHostPlayers[id];
-      if(Math.hypot(p.x+p.w/2 - c.x, p.y+p.h/2 - c.y) < 35){ c.taken = true; score++; totalCoinsAllTime++; break; }
+      if(Math.hypot(p.x+p.w/2 - c.x, p.y+p.h/2 - c.y) < 35){ c.taken = true; score++; totalCoinsAllTime++; coinsCollectedPerWorld[worldIndex] = (coinsCollectedPerWorld[worldIndex]||0)+1; break; }
     }
   });
 
@@ -3261,7 +3397,7 @@ function updateOnlineHost(){
         if(p.vy > 0 && p.y + p.h - p.vy <= e.y + 15){
           e.hit(); p.vy = -10;
           score += e.alive ? 1 : (e.isBoss ? 20 : 2);
-          if(!e.alive) enemiesDefeatedAllTime++; if(e.isBoss && !e.alive) bossesDefeated++;
+          if(!e.alive) enemiesDefeatedAllTime++; enemiesDefeatedPerWorld[worldIndex] = (enemiesDefeatedPerWorld[worldIndex]||0)+1; if(e.isBoss && !e.alive) bossesDefeated++;
         } else if(p.invincibleTimer <= 0 && !isInSpawnZone(p)){ damagePlayerOnline(id); }
       }
     });
@@ -3276,7 +3412,7 @@ function updateOnlineHost(){
         p.dead = true;
         e.hit();
         score += e.alive ? 1 : (e.isBoss ? 20 : 2);
-        if(!e.alive) enemiesDefeatedAllTime++; if(e.isBoss && !e.alive) bossesDefeated++;
+        if(!e.alive) enemiesDefeatedAllTime++; enemiesDefeatedPerWorld[worldIndex] = (enemiesDefeatedPerWorld[worldIndex]||0)+1; if(e.isBoss && !e.alive) bossesDefeated++;
         break;
       }
     }
@@ -3315,7 +3451,7 @@ function updateOnlineHost(){
     if(livesLostThisLevel === 0) stars++;
     if(coinsTotal === 0 || coinsCollected === coinsTotal) stars++;
     levelClearStars = stars; levelClearCoins = coinsCollected; levelClearCoinsTotal = coinsTotal;
-    if(stars === 3) perfectLevelsCount++;
+    if(stars === 3) perfectLevelsCount++; perfectLevelsPerWorld[worldIndex] = (perfectLevelsPerWorld[worldIndex]||0)+1;
     state = STATE_LEVEL_CLEAR;
   }
 
@@ -3534,7 +3670,7 @@ function gameLoopBody(){
     level.coins.forEach(c => {
       if(c.taken) return;
       for(const p of activePlayers){
-        if(Math.hypot(p.x+p.w/2 - c.x, p.y+p.h/2 - c.y) < 35){ c.taken = true; score++; totalCoinsAllTime++; break; }
+        if(Math.hypot(p.x+p.w/2 - c.x, p.y+p.h/2 - c.y) < 35){ c.taken = true; score++; totalCoinsAllTime++; coinsCollectedPerWorld[worldIndex] = (coinsCollectedPerWorld[worldIndex]||0)+1; break; }
       }
     });
 
@@ -3547,7 +3683,7 @@ function gameLoopBody(){
             e.hit(); p.vy = -10;
             triggerShake(e.isBoss ? 9 : 3, e.isBoss ? 16 : 8);
             score += e.alive ? 1 : (e.isBoss ? 20 : 2);
-            if(!e.alive) enemiesDefeatedAllTime++; if(e.isBoss && !e.alive) bossesDefeated++;
+            if(!e.alive) enemiesDefeatedAllTime++; enemiesDefeatedPerWorld[worldIndex] = (enemiesDefeatedPerWorld[worldIndex]||0)+1; if(e.isBoss && !e.alive) bossesDefeated++;
           } else if(p.invincibleTimer <= 0 && !isInSpawnZone(p)){ damagePlayer(p); }
         }
       });
@@ -3563,7 +3699,7 @@ function gameLoopBody(){
           e.hit();
           triggerShake(e.isBoss ? 7 : 2, e.isBoss ? 14 : 6);
           score += e.alive ? 1 : (e.isBoss ? 20 : 2);
-          if(!e.alive) enemiesDefeatedAllTime++; if(e.isBoss && !e.alive) bossesDefeated++;
+          if(!e.alive) enemiesDefeatedAllTime++; enemiesDefeatedPerWorld[worldIndex] = (enemiesDefeatedPerWorld[worldIndex]||0)+1; if(e.isBoss && !e.alive) bossesDefeated++;
           break;
         }
       }
@@ -3600,7 +3736,7 @@ function gameLoopBody(){
       if(livesLostThisLevel === 0) stars++;
       if(coinsTotal === 0 || coinsCollected === coinsTotal) stars++;
       levelClearStars = stars; levelClearCoins = coinsCollected; levelClearCoinsTotal = coinsTotal;
-    if(stars === 3) perfectLevelsCount++;
+    if(stars === 3) perfectLevelsCount++; perfectLevelsPerWorld[worldIndex] = (perfectLevelsPerWorld[worldIndex]||0)+1;
       state = STATE_LEVEL_CLEAR;
     }
   }
