@@ -153,15 +153,18 @@
   }
   #fullscreenBtn:active { transform: scale(0.94); }
   #wrap:fullscreen {
-    display: flex; align-items: center; justify-content: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
     width: 100%; height: 100%; background: #0b0810;
   }
   #wrap:-webkit-full-screen {
-    display: flex; align-items: center; justify-content: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
     width: 100%; height: 100%; background: #0b0810;
   }
   #wrap:fullscreen canvas, #wrap:-webkit-full-screen canvas {
-    max-width: 100vw; max-height: 92vh;
+    max-width: 100vw; max-height: 100vh;
+  }
+  #wrap:fullscreen #hint, #wrap:-webkit-full-screen #hint {
+    display: none;
   }
   #settingsOverlay {
     position: absolute; inset: 0; z-index: 50;
