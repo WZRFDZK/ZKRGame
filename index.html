@@ -152,18 +152,14 @@
     -webkit-user-select: none; user-select: none;
   }
   #fullscreenBtn:active { transform: scale(0.94); }
-  #wrap:fullscreen {
+  #wrap.fs-active {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     width: 100%; height: 100%; background: #0b0810;
   }
-  #wrap:-webkit-full-screen {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    width: 100%; height: 100%; background: #0b0810;
+  #wrap.fs-active canvas {
+    border: none; box-shadow: none;
   }
-  #wrap:fullscreen canvas, #wrap:-webkit-full-screen canvas {
-    max-width: 100vw; max-height: 100vh;
-  }
-  #wrap:fullscreen #hint, #wrap:-webkit-full-screen #hint {
+  #wrap.fs-active #hint {
     display: none;
   }
   #settingsOverlay {
@@ -2642,12 +2638,28 @@ function toggleFullscreen(){
   canvas.focus();
 }
 fullscreenBtn.addEventListener('click', toggleFullscreen);
-function updateFullscreenIcon(){
-  const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+
+function resizeCanvasForFullscreen(){
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
   fullscreenBtn.textContent = isFs ? '⤫' : '⛶';
+  wrapEl.classList.toggle('fs-active', isFs);
+  if(isFs){
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const ratio = WIDTH / HEIGHT;
+    let w = vw, h = vw / ratio;
+    if(h > vh){ h = vh; w = vh * ratio; }
+    canvas.style.width = Math.round(w) + 'px';
+    canvas.style.height = Math.round(h) + 'px';
+  } else {
+    canvas.style.width = '';
+    canvas.style.height = '';
+  }
 }
-document.addEventListener('fullscreenchange', updateFullscreenIcon);
-document.addEventListener('webkitfullscreenchange', updateFullscreenIcon);
+document.addEventListener('fullscreenchange', resizeCanvasForFullscreen);
+document.addEventListener('webkitfullscreenchange', resizeCanvasForFullscreen);
+window.addEventListener('resize', () => {
+  if(document.fullscreenElement || document.webkitFullscreenElement) resizeCanvasForFullscreen();
+});
 
 const settingsBtn = document.getElementById('settingsBtn');
 const settingsOverlay = document.getElementById('settingsOverlay');
