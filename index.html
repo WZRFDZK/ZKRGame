@@ -363,6 +363,9 @@ const WORLD_THEMES = [
   { name: "LA BANQUISE", bgTop: [90,170,235], bgBottom: [220,240,255], ground: [180,210,225], groundTop: [235,245,255], platform: [150,185,210], platformTop: [215,230,245], spike: [130,180,210], enemy: [110,145,180], accent: [80,180,255], deco: [155,195,220], clouds: [255,255,255] },
   { name: "LE VOLCAN", bgTop: [40,5,5], bgBottom: [220,50,20], ground: [42,24,20], groundTop: [78,38,24], platform: [55,30,22], platformTop: [92,48,26], spike: [255,110,40], enemy: [70,22,14], accent: [255,120,20], deco: [64,26,18], clouds: [255,140,80] },
   { name: "LES ABYSSES", bgTop: [2,6,30], bgBottom: [10,55,110], ground: [14,28,42], groundTop: [22,50,70], platform: [18,42,56], platformTop: [30,66,84], spike: [70,220,205], enemy: [12,55,64], accent: [50,235,205], deco: [10,38,52], clouds: [40,110,140] },
+  { name: "L'ÎLE PIRATE", bgTop: [10,60,90], bgBottom: [90,200,210], ground: [194,168,110], groundTop: [224,200,140], platform: [110,74,40], platformTop: [150,104,58], spike: [150,150,160], enemy: [120,20,20], accent: [255,205,60], deco: [40,90,50], clouds: [255,255,255] },
+  { name: "L'ARCHIPEL CÉLESTE", bgTop: [255,225,140], bgBottom: [255,250,225], ground: [225,205,170], groundTop: [245,230,200], platform: [200,180,140], platformTop: [235,220,190], spike: [255,215,60], enemy: [230,230,255], accent: [255,225,60], deco: [235,220,190], clouds: [255,255,255] },
+  { name: "LE PAYS DES SABRES", bgTop: [60,20,40], bgBottom: [230,150,170], ground: [50,30,30], groundTop: [90,50,45], platform: [110,30,30], platformTop: [160,50,45], spike: [180,180,190], enemy: [30,40,70], accent: [255,150,190], deco: [120,30,35], clouds: [255,220,230] },
 ];
 
 const MUSIC = {
@@ -375,7 +378,7 @@ const MUSIC = {
 };
 Object.values(MUSIC).forEach(a => { a.loop = true; a.volume = 0.45; a.preload = 'auto'; });
 
-const WORLD_MUSIC_KEYS = ['ville', 'desert', 'foret', 'banquise', 'desert', 'foret'];
+const WORLD_MUSIC_KEYS = ['ville', 'desert', 'foret', 'banquise', 'desert', 'foret', 'desert', 'ville', 'foret'];
 
 let musicEnabled = true;
 let musicVolume = 0.45;
@@ -411,11 +414,11 @@ function updateMusic(){
   playMusic(key);
 }
 
-const ENEMY_KINDS = ['thug', 'scorpion', 'critter', 'snow', 'imp', 'abyssal'];
-const BOSS_KINDS  = ['thug_boss', 'pharaoh_boss', 'tree_boss', 'ice_boss', 'volcano_boss', 'abyss_boss'];
+const ENEMY_KINDS = ['thug', 'scorpion', 'critter', 'snow', 'imp', 'abyssal', 'buccaneer', 'cloudguard', 'ronin'];
+const BOSS_KINDS  = ['thug_boss', 'pharaoh_boss', 'tree_boss', 'ice_boss', 'volcano_boss', 'abyss_boss', 'pirate_boss', 'sky_boss', 'shogun_boss'];
 
 const LEVEL_NAMES = ["NIVEAU 1", "NIVEAU 2", "NIVEAU 3", "NIVEAU 4", "NIVEAU BOSS"];
-const BOSS_NAMES = ["LE CAÏD DE LA RUE", "LE PHARAON MAUDIT", "L'ESPRIT DE LA FORÊT", "LE ROI DES GLACES", "LE SEIGNEUR DU MAGMA", "LA REINE DES ABYSSES"];
+const BOSS_NAMES = ["LE CAÏD DE LA RUE", "LE PHARAON MAUDIT", "L'ESPRIT DE LA FORÊT", "LE ROI DES GLACES", "LE SEIGNEUR DU MAGMA", "LA REINE DES ABYSSES", "LE CAPITAINE TEMPÊTE", "LE GARDIEN DU CIEL DORÉ", "LE SHOGUN DES OMBRES"];
 
 const DEFAULT_PALETTE = { skin:'#c9884f', skinShade:'#a8703f', hoodie:'#14141a', hoodieLight:'#20202a', accent:'#2f6fe0', accentLight:'#5b93f0', hair:'#151018', hairHi:'#241a26', shoeWhite:'#f1f5fa', shoeBlack:'#15151a', silver:'#e9e9ee' };
 
@@ -1300,6 +1303,79 @@ function drawEnemySprite(kind, x, y, w, h, tick, dir){
     ctx.beginPath(); ctx.arc(w*0.36,h*0.42,2.2,0,Math.PI*2); ctx.fill();
     ctx.fillStyle = '#0c2430';
     for(let i=0;i<4;i++){ ctx.beginPath(); ctx.moveTo(w*0.68,h*0.32+i*8); ctx.lineTo(w*0.9,h*0.3+i*9); ctx.lineTo(w*0.68,h*0.4+i*8); ctx.closePath(); ctx.fill(); }
+  } else if(kind === 'buccaneer'){
+    // Flibustier bagarreur : bandana, cache-œil, gilet ouvert et sabre court
+    ctx.fillStyle = '#c9884f';
+    ctx.beginPath(); ctx.arc(w*0.5, h*0.28, w*0.3, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#3a1a12';
+    ctx.beginPath(); ctx.moveTo(w*0.5,h*0.32); ctx.lineTo(w*0.7,h*0.42); ctx.lineTo(w*0.62,h*0.5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#8a1414';
+    ctx.beginPath(); ctx.arc(w*0.5, h*0.16, w*0.34, Math.PI, Math.PI*2); ctx.fill();
+    ctx.fillRect(w*0.16,h*0.14,w*0.14,h*0.1);
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(w*0.32,h*0.24,w*0.14,6);
+    ctx.fillStyle = '#3a2418';
+    ctx.beginPath(); ctx.moveTo(w*0.42,h*0.32); ctx.lineTo(w*0.5,h*0.4); ctx.lineTo(w*0.58,h*0.32); ctx.stroke();
+    ctx.strokeStyle = '#3a2418'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(w*0.42,h*0.32); ctx.lineTo(w*0.5,h*0.4); ctx.lineTo(w*0.58,h*0.32); ctx.stroke();
+    ctx.fillStyle = '#3a1418';
+    roundRectPath(w*0.18, h*0.42, w*0.64, h*0.5, 6); ctx.fill();
+    ctx.fillStyle = '#c9884f';
+    ctx.fillRect(w*0.4, h*0.44, w*0.2, h*0.34);
+    ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(w*0.6,h*0.5); ctx.lineTo(w*0.6,h*0.85); ctx.stroke();
+    const wig = Math.sin(tick*0.4)*4;
+    ctx.strokeStyle = '#cfd6de'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(w*0.8,h*0.6); ctx.lineTo(w*1.05+wig,h*0.32); ctx.stroke();
+    ctx.fillStyle = '#8a1414';
+    ctx.beginPath(); ctx.arc(w*0.32,h*0.18,4,0,Math.PI*2); ctx.fill();
+  } else if(kind === 'cloudguard'){
+    // Gardien du ciel : armure de nuage, ailes légères, lance dorée
+    const bob = Math.sin(tick*0.25)*3;
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.55+bob,w*0.6,0,Math.PI*2); ctx.fill();
+    const wingFlap = Math.sin(tick*0.35)*6;
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.beginPath(); ctx.moveTo(w*0.14,h*0.5+bob); ctx.quadraticCurveTo(-w*0.18,h*0.3+wingFlap,w*0.02,h*0.12); ctx.quadraticCurveTo(w*0.16,h*0.32,w*0.14,h*0.5+bob); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(w*0.86,h*0.5+bob); ctx.quadraticCurveTo(w*1.18,h*0.3-wingFlap,w*0.98,h*0.12); ctx.quadraticCurveTo(w*0.84,h*0.32,w*0.86,h*0.5+bob); ctx.fill();
+    const bodyG = ctx.createLinearGradient(0,h*0.2+bob,0,h*0.9+bob);
+    bodyG.addColorStop(0,'#f4f8ff'); bodyG.addColorStop(1,'#c7d6ea');
+    ctx.fillStyle = bodyG;
+    ctx.beginPath(); ctx.ellipse(w*0.5,h*0.5+bob,w*0.32,h*0.4,0,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#ffd23c'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.3+bob,w*0.24,0,Math.PI*2); ctx.stroke();
+    const eyeGlow = 0.6+0.4*Math.sin(tick*0.5);
+    ctx.fillStyle = `rgba(255,225,90,${eyeGlow})`;
+    ctx.beginPath(); ctx.arc(w*0.42,h*0.3+bob,3,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(w*0.58,h*0.3+bob,3,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#ffd23c'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(w*0.78,h*0.9+bob); ctx.lineTo(w*1.08,h*0.05+bob); ctx.stroke();
+    ctx.fillStyle = '#ffd23c';
+    ctx.beginPath(); ctx.moveTo(w*1.08,h*0.05+bob); ctx.lineTo(w*1.0,h*0.16+bob); ctx.lineTo(w*1.14,h*0.16+bob); ctx.closePath(); ctx.fill();
+  } else if(kind === 'ronin'){
+    // Samouraï errant : kimono sombre, chignon, katana au fourreau
+    ctx.fillStyle = '#e8b98a';
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.22,w*0.26,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#151018';
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.14,w*0.24,Math.PI,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.02,5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(w*0.38,h*0.2,w*0.08,4); ctx.fillRect(w*0.54,h*0.2,w*0.08,4);
+    const kimonoG = ctx.createLinearGradient(0,h*0.36,0,h);
+    kimonoG.addColorStop(0,'#1c2540'); kimonoG.addColorStop(1,'#0e1424');
+    ctx.fillStyle = kimonoG;
+    ctx.beginPath();
+    ctx.moveTo(w*0.24,h*0.4); ctx.lineTo(w*0.5,h*0.5); ctx.lineTo(w*0.76,h*0.4);
+    ctx.lineTo(w*0.82,h*1.0); ctx.lineTo(w*0.18,h*1.0); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#8a1414'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(w*0.5,h*0.42); ctx.lineTo(w*0.5,h*0.86); ctx.stroke();
+    ctx.strokeStyle = '#7a6a4a'; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(w*0.08,h*0.5); ctx.lineTo(w*0.9,h*0.72); ctx.stroke();
+    ctx.fillStyle = '#d4af37';
+    ctx.beginPath(); ctx.arc(w*0.9,h*0.72,4,0,Math.PI*2); ctx.fill();
+    const step = Math.sin(tick*0.3)*3;
+    ctx.fillStyle = '#0e1424';
+    ctx.fillRect(w*0.3+step,h*0.92,w*0.16,h*0.08); ctx.fillRect(w*0.54-step,h*0.92,w*0.16,h*0.08);
   }
   ctx.restore();
 }
@@ -1543,6 +1619,125 @@ function drawBossSprite(kind, x, y, w, h, tick, dir){
     for(let i=0;i<5;i++){
       const ang = tick*0.03 + i*1.3;
       ctx.beginPath(); ctx.arc(w*0.5+Math.cos(ang)*w*0.6, h*0.5+Math.sin(ang)*h*0.4, 2, 0, Math.PI*2); ctx.fill();
+    }
+  } else if(kind === 'pirate_boss'){
+    // Capitaine de la flibuste : long manteau, tricorne, sabres croisés et lueur dorée du trésor
+    const auraG = ctx.createRadialGradient(w*0.5,h*0.45,w*0.08,w*0.5,h*0.45,w*0.9);
+    auraG.addColorStop(0, `rgba(255,205,60,${0.26*pulse})`); auraG.addColorStop(1, 'rgba(255,205,60,0)');
+    ctx.fillStyle = auraG; ctx.beginPath(); ctx.arc(w*0.5,h*0.45,w*0.9,0,Math.PI*2); ctx.fill();
+
+    const coatG = ctx.createLinearGradient(0,h*0.32,0,h*1.02);
+    coatG.addColorStop(0,'#241010'); coatG.addColorStop(1,'#0a0505');
+    ctx.fillStyle = coatG;
+    ctx.beginPath();
+    ctx.moveTo(w*0.14,h*0.38);
+    ctx.quadraticCurveTo(w*0.0+Math.sin(tick*0.15)*4, h*0.76, w*0.08, h*1.0);
+    ctx.lineTo(w*0.92, h*1.0);
+    ctx.quadraticCurveTo(w*1.0-Math.sin(tick*0.15)*4, h*0.76, w*0.86,h*0.38);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,205,60,0.55)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(w*0.5,h*0.4); ctx.lineTo(w*0.5,h*0.98); ctx.stroke();
+
+    ctx.fillStyle = '#c9884f';
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.3,w*0.24,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#0e0e12';
+    ctx.beginPath();
+    ctx.moveTo(w*0.16,h*0.16); ctx.lineTo(w*0.5,h*0.0); ctx.lineTo(w*0.84,h*0.16);
+    ctx.quadraticCurveTo(w*0.5,h*0.3,w*0.16,h*0.16); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd23c';
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.1,4,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#0a0a0a';
+    ctx.beginPath(); ctx.arc(w*0.42,h*0.28,3.2,0,Math.PI*2); ctx.fill();
+    const eyeGlowP = 0.6+0.4*Math.sin(tick*0.4);
+    ctx.fillStyle = `rgba(255,60,50,${eyeGlowP})`;
+    ctx.beginPath(); ctx.arc(w*0.58,h*0.28,3.2,0,Math.PI*2); ctx.fill();
+
+    ctx.strokeStyle = '#dfe3e8'; ctx.lineWidth = 4.5;
+    const swordSwing = Math.sin(tick*0.1)*8;
+    ctx.beginPath(); ctx.moveTo(w*0.1,h*0.6+swordSwing); ctx.lineTo(w*0.42,h*0.42); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(w*0.9,h*0.6-swordSwing); ctx.lineTo(w*0.58,h*0.42); ctx.stroke();
+    ctx.fillStyle = '#ffd23c';
+    ctx.beginPath(); ctx.arc(w*0.1,h*0.6+swordSwing,4,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(w*0.9,h*0.6-swordSwing,4,0,Math.PI*2); ctx.fill();
+
+    ctx.fillStyle = `rgba(255,215,90,${0.5+0.5*Math.sin(tick*0.5)})`;
+    for(let i=0;i<4;i++){
+      const ang = tick*0.05 + i*1.7;
+      ctx.beginPath(); ctx.arc(w*0.5+Math.cos(ang)*w*0.5, h*0.55+Math.sin(ang)*h*0.3, 2.4, 0, Math.PI*2); ctx.fill();
+    }
+  } else if(kind === 'sky_boss'){
+    // Gardien doré des cieux : armure de pierre céleste, ailes immenses, foudre crépitante
+    const auraG = ctx.createRadialGradient(w*0.5,h*0.42,w*0.08,w*0.5,h*0.42,w*0.95);
+    auraG.addColorStop(0, `rgba(255,225,90,${0.3*pulse})`); auraG.addColorStop(1, 'rgba(255,225,90,0)');
+    ctx.fillStyle = auraG; ctx.beginPath(); ctx.arc(w*0.5,h*0.42,w*0.95,0,Math.PI*2); ctx.fill();
+
+    const wingFlap = Math.sin(tick*0.12)*8;
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath(); ctx.moveTo(w*0.16,h*0.5); ctx.quadraticCurveTo(-w*0.3,h*0.3+wingFlap,w*0.0,h*0.02); ctx.quadraticCurveTo(w*0.2,h*0.32,w*0.16,h*0.5); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(w*0.84,h*0.5); ctx.quadraticCurveTo(w*1.3,h*0.3-wingFlap,w*1.0,h*0.02); ctx.quadraticCurveTo(w*0.8,h*0.32,w*0.84,h*0.5); ctx.fill();
+
+    const bodyG = ctx.createLinearGradient(w*0.2,h*0.3,w*0.8,h*0.3);
+    bodyG.addColorStop(0,'#e8c96a'); bodyG.addColorStop(0.5,'#fff2c4'); bodyG.addColorStop(1,'#e8c96a');
+    ctx.fillStyle = bodyG;
+    roundRectPath(w*0.2,h*0.32,w*0.6,h*0.58,12); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2;
+    ctx.strokeRect(w*0.2,h*0.32,w*0.6,h*0.58);
+
+    ctx.fillStyle = '#fff8e0';
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.18,w*0.24,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#ffd23c'; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.18,w*0.3,0,Math.PI*2); ctx.stroke();
+    const eyeGlowS = 0.6+0.4*Math.sin(tick*0.3);
+    ctx.fillStyle = `rgba(255,190,30,${eyeGlowS})`;
+    ctx.beginPath(); ctx.arc(w*0.42,h*0.18,3.4,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(w*0.58,h*0.18,3.4,0,Math.PI*2); ctx.fill();
+
+    const boltGlow = 0.5+0.5*Math.sin(tick*0.4);
+    ctx.strokeStyle = `rgba(255,240,120,${0.7+0.3*boltGlow})`; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(w*0.5,h*0.35); ctx.lineTo(w*0.42,h*0.55); ctx.lineTo(w*0.54,h*0.55); ctx.lineTo(w*0.46,h*0.82); ctx.stroke();
+
+    ctx.fillStyle = `rgba(255,255,255,${0.5+0.5*Math.sin(tick*0.35)})`;
+    for(let i=0;i<4;i++){
+      const ang = tick*0.045 + i*1.6;
+      ctx.beginPath(); ctx.arc(w*0.5+Math.cos(ang)*w*0.6, h*0.45+Math.sin(ang)*h*0.35, 2.2, 0, Math.PI*2); ctx.fill();
+    }
+  } else if(kind === 'shogun_boss'){
+    // Shogun des ombres : armure lamellaire sombre, casque cornu, immense katana et aura pourpre
+    const auraG = ctx.createRadialGradient(w*0.5,h*0.45,w*0.08,w*0.5,h*0.45,w*0.9);
+    auraG.addColorStop(0, `rgba(255,80,120,${0.28*pulse})`); auraG.addColorStop(1, 'rgba(255,80,120,0)');
+    ctx.fillStyle = auraG; ctx.beginPath(); ctx.arc(w*0.5,h*0.45,w*0.9,0,Math.PI*2); ctx.fill();
+
+    const kimonoG = ctx.createLinearGradient(0,h*0.32,0,h*1.02);
+    kimonoG.addColorStop(0,'#1c0e18'); kimonoG.addColorStop(1,'#08040a');
+    ctx.fillStyle = kimonoG;
+    ctx.beginPath();
+    ctx.moveTo(w*0.16,h*0.4); ctx.lineTo(w*0.5,h*0.5); ctx.lineTo(w*0.84,h*0.4);
+    ctx.lineTo(w*0.9,h*1.0); ctx.lineTo(w*0.1,h*1.0); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,80,120,0.55)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(w*0.5,h*0.42); ctx.lineTo(w*0.5,h*0.96); ctx.stroke();
+
+    ctx.fillStyle = '#c9884f';
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.26,w*0.24,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#14080f';
+    ctx.beginPath(); ctx.arc(w*0.5,h*0.2,w*0.28,Math.PI,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#8a1428'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(w*0.3,h*0.1); ctx.lineTo(w*0.2,h*-0.1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(w*0.7,h*0.1); ctx.lineTo(w*0.8,h*-0.1); ctx.stroke();
+    const eyeGlowSh = 0.6+0.4*Math.sin(tick*0.4);
+    ctx.fillStyle = `rgba(255,50,80,${eyeGlowSh})`;
+    ctx.beginPath(); ctx.arc(w*0.42,h*0.26,3.4,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(w*0.58,h*0.26,3.4,0,Math.PI*2); ctx.fill();
+
+    ctx.strokeStyle = '#dfe3e8'; ctx.lineWidth = 5;
+    const slash = Math.sin(tick*0.1)*10;
+    ctx.beginPath(); ctx.moveTo(w*0.9,h*0.2+slash); ctx.lineTo(w*0.3,h*0.9-slash); ctx.stroke();
+    ctx.strokeStyle = '#8a1428'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(w*0.3,h*0.9-slash); ctx.lineTo(w*0.2,h*1.02-slash); ctx.stroke();
+
+    ctx.fillStyle = `rgba(255,90,130,${0.5+0.5*Math.sin(tick*0.5)})`;
+    for(let i=0;i<4;i++){
+      const ang = tick*0.05 + i*1.7;
+      ctx.beginPath(); ctx.arc(w*0.5+Math.cos(ang)*w*0.55, h*0.55+Math.sin(ang)*h*0.32, 2.2, 0, Math.PI*2); ctx.fill();
     }
   }
 
@@ -2780,6 +2975,83 @@ function drawWorldDeco(worldIdx, camX) {
       ctx.beginPath(); ctx.arc(bx, by, 2.5 + (i%3), 0, Math.PI*2); ctx.fill();
     }
   }
+  else if (worldIdx === 6) {
+    // Île pirate : palmiers et épaves de navires échoués
+    for (let i = 0; i < 10; i++) {
+      let h = 130 + (i % 3) * 50;
+      let x = mod((i * 220 - camX * 0.22), WIDTH + 60) - 40;
+      const sway = Math.sin(frameTick*0.02 + i*1.4) * 6;
+      ctx.strokeStyle = '#6b4423'; ctx.lineWidth = 9; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x, GROUND_Y); ctx.quadraticCurveTo(x+sway*1.5, GROUND_Y-h*0.6, x+sway*2.4, GROUND_Y-h); ctx.stroke();
+      ctx.fillStyle = 'rgba(40,90,50,0.85)';
+      for(let f=0; f<5; f++){
+        const ang = (f/5)*Math.PI*2 + frameTick*0.006;
+        ctx.beginPath();
+        ctx.ellipse(x+sway*2.4+Math.cos(ang)*26, GROUND_Y-h+Math.sin(ang)*12, 30, 11, ang, 0, Math.PI*2);
+        ctx.fill();
+      }
+      if(i % 3 === 1){
+        ctx.fillStyle = 'rgba(60,50,40,0.6)';
+        ctx.beginPath(); ctx.moveTo(x+40, GROUND_Y); ctx.lineTo(x+130, GROUND_Y-10); ctx.lineTo(x+120, GROUND_Y+18); ctx.lineTo(x+50, GROUND_Y+18); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = 'rgba(90,70,50,0.4)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x+95, GROUND_Y-10); ctx.lineTo(x+95, GROUND_Y-70); ctx.stroke();
+        ctx.fillStyle = 'rgba(220,220,220,0.35)';
+        ctx.beginPath(); ctx.moveTo(x+95,GROUND_Y-68); ctx.lineTo(x+95,GROUND_Y-30); ctx.lineTo(x+120,GROUND_Y-38); ctx.closePath(); ctx.fill();
+      }
+      if(i % 4 === 2){
+        ctx.fillStyle = `rgba(255,205,60,${0.5+0.4*Math.sin(frameTick*0.05+i)})`;
+        ctx.fillRect(x+10, GROUND_Y-16, 20, 12);
+      }
+    }
+  }
+  else if (worldIdx === 7) {
+    // Archipel céleste : îles flottantes et ruines antiques au-dessus des nuages
+    for (let i = 0; i < 9; i++) {
+      let w = 140 + (i % 3) * 60;
+      let h = 40 + (i % 2) * 14;
+      let x = mod((i * 260 - camX * 0.18), WIDTH + w) - w;
+      let y = GROUND_Y - 220 - (i % 4) * 60;
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath(); ctx.ellipse(x+w/2, y, w/2, h/2, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = rgb(theme.deco);
+      ctx.fillRect(x+w*0.2, y+h*0.1, w*0.6, h*0.5);
+      ctx.fillStyle = '#e8c96a';
+      ctx.fillRect(x+w*0.3, y-h*0.6, 8, h*0.7);
+      ctx.fillRect(x+w*0.66, y-h*0.6, 8, h*0.7);
+      const glow = 0.4+0.4*Math.abs(Math.sin(frameTick*0.03+i*1.2));
+      ctx.strokeStyle = `rgba(255,225,90,${glow})`; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x+w*0.34, y-h*0.6); ctx.lineTo(x+w*0.7, y-h*0.6); ctx.stroke();
+    }
+    ctx.strokeStyle = `rgba(255,240,150,${0.4+0.4*Math.abs(Math.sin(frameTick*0.08))})`; ctx.lineWidth = 2.4;
+    for(let i=0;i<3;i++){
+      const lx = mod((i*400 - camX*0.3), WIDTH+80) - 40;
+      ctx.beginPath(); ctx.moveTo(lx, 60); ctx.lineTo(lx-14, 130); ctx.lineTo(lx+10, 130); ctx.lineTo(lx-8, 210); ctx.stroke();
+    }
+  }
+  else if (worldIdx === 8) {
+    // Pays des sabres : pagodes, torii et pétales de sakura
+    for (let i = 0; i < 9; i++) {
+      let w = 120 + (i % 2) * 50;
+      let h = 150 + (i % 3) * 60;
+      let x = mod((i * 240 - camX * 0.22), WIDTH + w) - w;
+      ctx.fillStyle = rgb(theme.deco);
+      ctx.fillRect(x+w*0.42, GROUND_Y-h, w*0.16, h);
+      for(let t=0; t<3; t++){
+        const ty = GROUND_Y - h*0.3 - t*h*0.32;
+        ctx.fillStyle = rgb(theme.deco);
+        ctx.beginPath(); ctx.moveTo(x, ty); ctx.lineTo(x+w/2, ty-30); ctx.lineTo(x+w, ty); ctx.lineTo(x+w*0.85, ty+10); ctx.lineTo(x+w*0.15, ty+10); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = 'rgba(255,150,190,0.3)';
+        ctx.fillRect(x+w*0.25, ty-6, w*0.5, 5);
+      }
+    }
+    ctx.fillStyle = `rgba(255,180,205,0.6)`;
+    for(let i=0;i<24;i++){
+      const px = mod((i*77 - camX*0.28), WIDTH+20) - 10;
+      const py = mod(GROUND_Y - (frameTick*0.9 + i*38), GROUND_Y-20);
+      const drift = Math.sin(frameTick*0.03+i)*10;
+      ctx.beginPath(); ctx.ellipse(px+drift, py, 3.6, 2, frameTick*0.02+i, 0, Math.PI*2); ctx.fill();
+    }
+  }
 }
 
 function drawGroundTexture(worldIdx, r, camX){
@@ -2818,6 +3090,22 @@ function drawGroundTexture(worldIdx, r, camX){
     const bglow = 0.4+0.4*Math.sin(frameTick*0.06);
     ctx.fillStyle = `rgba(90,240,215,${bglow})`;
     for(let x = Math.floor(r.x/110)*110; x < r.x+r.w; x += 110){ ctx.beginPath(); ctx.arc(x+40, r.y+20, 2.2, 0, Math.PI*2); ctx.fill(); }
+  } else if(worldIdx === 6){
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    for(let x = Math.floor(r.x/26)*26; x < r.x+r.w; x += 26){ ctx.beginPath(); ctx.arc(x+8, r.y+10, 4, 0, Math.PI*2); ctx.fill(); }
+    ctx.strokeStyle = 'rgba(150,110,60,0.35)'; ctx.lineWidth = 1.6;
+    for(let x = Math.floor(r.x/70)*70; x < r.x+r.w; x += 70){ ctx.beginPath(); ctx.moveTo(x, r.y+18); ctx.quadraticCurveTo(x+35, r.y+30, x+70, r.y+18); ctx.stroke(); }
+  } else if(worldIdx === 7){
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.6;
+    for(let x = Math.floor(r.x/60)*60; x < r.x+r.w; x += 60){ ctx.beginPath(); ctx.moveTo(x, r.y+4); ctx.lineTo(x+14, r.y+30); ctx.lineTo(x-2, r.y+55); ctx.stroke(); }
+    const lg = 0.4+0.35*Math.abs(Math.sin(frameTick*0.05));
+    ctx.strokeStyle = `rgba(255,225,90,${lg})`; ctx.lineWidth = 1.4;
+    for(let x = Math.floor(r.x/95)*95; x < r.x+r.w; x += 95){ ctx.beginPath(); ctx.moveTo(x+8, r.y+8); ctx.lineTo(x+18, r.y+34); ctx.lineTo(x+10, r.y+62); ctx.stroke(); }
+  } else if(worldIdx === 8){
+    ctx.strokeStyle = 'rgba(20,10,10,0.5)'; ctx.lineWidth = 2;
+    for(let x = Math.floor(r.x/56)*56; x < r.x+r.w; x += 56){ ctx.beginPath(); ctx.moveTo(x, r.y+8); ctx.lineTo(x, r.y+60); ctx.stroke(); }
+    ctx.fillStyle = `rgba(255,150,190,0.4)`;
+    for(let x = Math.floor(r.x/80)*80; x < r.x+r.w; x += 80){ ctx.beginPath(); ctx.ellipse(x+18, r.y+10, 3.4, 2, 0.6, 0, Math.PI*2); ctx.fill(); }
   }
   ctx.restore();
 }
@@ -2848,6 +3136,21 @@ function drawPlatformTexture(worldIdx, r){
     ctx.fillStyle = 'rgba(90,230,205,0.35)';
     ctx.beginPath(); ctx.arc(r.x+r.w*0.3, r.y+r.h*0.4, 2, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(r.x+r.w*0.7, r.y+r.h*0.6, 2, 0, Math.PI*2); ctx.fill();
+  } else if(worldIdx === 6){
+    ctx.strokeStyle = 'rgba(60,35,15,0.45)'; ctx.lineWidth = 1.6;
+    for(let x = r.x+14; x < r.x+r.w; x += 28){ ctx.beginPath(); ctx.moveTo(x, r.y); ctx.lineTo(x, r.y+r.h); ctx.stroke(); }
+    ctx.strokeStyle = 'rgba(255,205,60,0.3)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(r.x, r.y+r.h*0.5); ctx.lineTo(r.x+r.w, r.y+r.h*0.5); ctx.stroke();
+  } else if(worldIdx === 7){
+    ctx.strokeStyle = 'rgba(200,175,110,0.5)'; ctx.lineWidth = 1.4;
+    for(let x = r.x+16; x < r.x+r.w; x += 34){ ctx.beginPath(); ctx.moveTo(x, r.y); ctx.lineTo(x, r.y+r.h); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(255,225,90,0.35)';
+    ctx.beginPath(); ctx.arc(r.x+r.w*0.5, r.y+r.h*0.5, 2.4, 0, Math.PI*2); ctx.fill();
+  } else if(worldIdx === 8){
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath(); ctx.moveTo(r.x+4, r.y+r.h*0.4); ctx.lineTo(r.x+r.w*0.35, r.y+2); ctx.lineTo(r.x+r.w*0.5,r.y+r.h*0.5); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(20,10,10,0.4)'; ctx.lineWidth = 1.4;
+    for(let x = r.x+10; x < r.x+r.w; x += 30){ ctx.beginPath(); ctx.moveTo(x, r.y); ctx.lineTo(x, r.y+r.h); ctx.stroke(); }
   }
   ctx.restore();
 }
