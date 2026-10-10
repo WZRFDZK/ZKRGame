@@ -242,7 +242,7 @@
 <body>
 <div id="wrap">
   <canvas id="game" width="960" height="540"></canvas>
-  <div id="hint">Flèches : se déplacer &nbsp;|&nbsp; Espace : sauter &nbsp;|&nbsp; Bas : s'accroupir / glisser &nbsp;|&nbsp; E : tir à distance &nbsp;|&nbsp; M : carte &nbsp;|&nbsp; C : personnages &nbsp;|&nbsp; H : accueil &nbsp;|&nbsp; ⚙ : mode 2 joueurs local</div>
+  <div id="hint">Flèches : se déplacer &nbsp;|&nbsp; Espace : sauter &nbsp;|&nbsp; Bas : s'accroupir / glisser &nbsp;|&nbsp; E : tir à distance &nbsp;|&nbsp; M : carte &nbsp;|&nbsp; C : personnages &nbsp;|&nbsp; H : accueil &nbsp;|&nbsp; ⚙ : mode 2 joueurs local &nbsp;|&nbsp; 🎮 Manette : stick/croix + A sauter, X tir, Start carte</div>
 
   <div id="deviceOverlay">
     <div id="deviceBox">
@@ -919,6 +919,7 @@ class Projectile {
     this.life = PROJECTILE_LIFE; this.dead = false;
     this.color = color || '#5b93f0';
     this.hostile = !!hostile;
+    this.x0 = x; this.t0 = serverNow(); this.pid = ++projectileSeq; this.owner = null;
   }
   get rect(){ return {x:this.x, y:this.y, w:this.w, h:this.h}; }
   update(solids){
@@ -1109,7 +1110,7 @@ class Player {
       this.coyoteTimer = 0; this.jumpBufferTimer = 0;
       this.squash.sx = 0.7; this.squash.sy = 1.35;
       spawnParticles(this.x+this.w/2, this.y+this.h-2, 5, 'rgba(255,255,255,0.55)', {spd:1.2, spdVar:1, life:14, size:2.4, up:1, grav:0.05});
-      if(this === player || this === myPredPlayer || (onlineMode && isHost && this === onlineHostPlayers[myId])) playSfx('jump');
+      if(this === player || this === myPredPlayer) playSfx('jump');
     }
     // Saut variable : relâcher le bouton pendant la montée coupe la vitesse ascendante (petit saut).
     if(!jump && this.vy < JUMP_VELOCITY * 0.42) this.vy = JUMP_VELOCITY * 0.42;
@@ -2277,21 +2278,21 @@ function FLAT(w, l){ return w * LEVELS_PER_WORLD + l; }
 let state = STATE_DEVICE, worldIndex = 0, levelIndex = 0, lives = 3, lives2 = 3, score = 0, cameraX = 0, levelTransitionTimer = 0, frameTick = 0;
 let screenShakeTimer = 0, screenShakeMag = 0;
 let comboCount = 0, comboTimer = 0;
-function triggerShake(mag, dur){ screenShakeMag = Math.max(screenShakeMag, mag); screenShakeTimer = Math.max(screenShakeTimer, dur); }
+function triggerShake(mag, dur){ screenShakeMag = Math.max(screenShakeMag, mag); screenShakeTimer = Math.max(screenShakeTimer, dur); if(mag >= 5 && padCount) padRumble(Math.min(400, dur * 18), Math.min(1, mag / 10), Math.min(1, mag / 14)); }
 // Résout le résultat d'un coup porté à un ennemi (stomp ou tir) : gère les dégâts, le score,
 // le combo façon "beat 'em up" (bonus qui grimpe tant qu'on enchaîne les éliminations sans pause)
 // et les effets visuels associés.
 // Gère la collecte d'une pièce, normale ou power-up (étoile = invincibilité + élimination au
 // contact, éclair = vitesse), avec les effets visuels et le score associés.
-function applyCoinPickup(c, p){
+function applyCoinPickup(c, p, remote){
   c.taken = true;
-  totalCoinsAllTime++; coinsCollectedPerWorld[worldIndex] = (coinsCollectedPerWorld[worldIndex]||0)+1;
+  if(!remote){ totalCoinsAllTime++; coinsCollectedPerWorld[worldIndex] = (coinsCollectedPerWorld[worldIndex]||0)+1; }
   if(c.type === 'star'){
     score += 5;
     p.powerupType = 'star'; p.powerupTimer = 360;
     spawnParticles(c.x, c.y, 16, '#ffe066', {spd:2.6, spdVar:2.2, life:26, size:3.2, up:1});
     spawnFloatText(c.x, c.y-10, 'ÉTOILE !', '#ffe066');
-    triggerShake(4, 10);
+    if(!remote) triggerShake(4, 10);
   } else if(c.type === 'speed'){
     score += 5;
     p.powerupType = 'speed'; p.powerupTimer = 360;
@@ -2527,13 +2528,140 @@ let coopMode = false;
 let player2 = new Player();
 let cameraX2 = 0;
 
-function rawControlsP1(){
+// ===================== MANETTES (Gamepad API) =====================
+// Compatible avec toutes les manettes que le navigateur expose : Xbox 360/One/Series, PlayStation 3/4/5,
+// Switch Pro / Joy-Con, 8BitDo, Steam Controller/Deck, manettes génériques USB/Bluetooth (mapping "standard"
+// ou non). Branchement à chaud, plusieurs manettes, vibration au choc.
+//   Stick gauche / croix : bouger  |  A / ✕ : sauter / valider  |  X / ▢, B / ○, RB, RT : tir
+//   Bas (stick/croix) : s'accroupir  |  Start : carte  |  Select : personnages  |  LB+RB+Start : accueil
+// Mode 2 joueurs local : 1re manette = joueur 1, 2e manette = joueur 2 (clavier IJKL/O toujours dispo).
+const PAD_DEAD = 0.35;
+const NO_PAD = { left: false, right: false, up: false, down: false, a: false, b: false, x: false, y: false, lb: false, rb: false, start: false, select: false };
+let padCtl = [null, null];   // commandes continues par joueur (0 = J1, 1 = J2)
+let padMerged = { ...NO_PAD };
+let padPrev = { ...NO_PAD };
+let padNextRepeat = {};
+let padCount = 0;
+let padToastTimer = null;
+
+function padBtn(gp, i){ const b = gp.buttons[i]; return !!b && (b.pressed || b.value > 0.5); }
+// Hat/croix directionnelle encodée sur un axe (manettes génériques Chrome : axe 9 de -1 à 1 par pas de 2/7).
+function padHat(v){
+  if(v == null || Math.abs(v) > 1.1) return null;
+  const idx = Math.round((v + 1) * 3.5);
+  if(idx < 0 || idx > 7) return null;
+  return [[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1]][idx];
+}
+function padRead(gp){
+  const std = gp.mapping === 'standard';
+  const n = gp.buttons.length;
+  const ax = (i) => (gp.axes && typeof gp.axes[i] === 'number' && isFinite(gp.axes[i])) ? gp.axes[i] : 0;
+  let dx = ax(0), dy = ax(1);
+  const s = { left: dx < -PAD_DEAD, right: dx > PAD_DEAD, up: dy < -0.6, down: dy > 0.55 };
+  let a, b, x, y, lb, rb, lt, rt, select, start, du = false, dd = false, dl = false, dr = false;
+  if(std || n >= 12){
+    a = padBtn(gp, 0); b = padBtn(gp, 1); x = padBtn(gp, 2); y = padBtn(gp, 3);
+    lb = padBtn(gp, 4); rb = padBtn(gp, 5); lt = padBtn(gp, 6); rt = padBtn(gp, 7);
+    select = padBtn(gp, 8); start = padBtn(gp, 9);
+    if(n >= 16){ du = padBtn(gp, 12); dd = padBtn(gp, 13); dl = padBtn(gp, 14); dr = padBtn(gp, 15); }
+  } else {
+    // manette générique sans mapping standard : on suppose 4 boutons de face + épaules + select/start
+    a = padBtn(gp, 0) || padBtn(gp, 1); b = false; x = padBtn(gp, 2) || padBtn(gp, 3); y = false;
+    lb = padBtn(gp, 4); rb = padBtn(gp, 5);
+    lt = n > 8 ? padBtn(gp, 6) : false; rt = n > 8 ? padBtn(gp, 7) : false;
+    select = n > 8 ? padBtn(gp, 8) : padBtn(gp, 6);
+    start = n > 8 ? padBtn(gp, 9) : padBtn(gp, 7);
+  }
+  if(!du && !dd && !dl && !dr){
+    const h = gp.axes && gp.axes.length > 9 ? padHat(gp.axes[9]) : null;
+    if(h){ dl = h[0] < 0; dr = h[0] > 0; du = h[1] < 0; dd = h[1] > 0; }
+    else if(!std && gp.axes && gp.axes.length >= 8 && n < 12){ dl = ax(6) < -0.5; dr = ax(6) > 0.5; du = ax(7) < -0.5; dd = ax(7) > 0.5; }
+  }
   return {
-    left: isKeyDown('ArrowLeft') || isActionBindDown(KEYBINDS.left),
-    right: isKeyDown('ArrowRight') || isActionBindDown(KEYBINDS.right),
-    down: isKeyDown('ArrowDown') || isActionBindDown(KEYBINDS.down),
-    jump: isKeyDown(' ') || isActionBindDown(KEYBINDS.jump),
-    shoot: isKeyDown('e') || isActionBindDown(KEYBINDS.shoot)
+    left: s.left || dl, right: s.right || dr, up: s.up || du, down: s.down || dd,
+    a, b, x, y, lb, rb, start, select,
+    jump: a || du, shoot: x || b || rb || rt || lt
+  };
+}
+function padList(){
+  let list = [];
+  try { list = Array.from((navigator.getGamepads && navigator.getGamepads()) || []); } catch(err){ list = []; }
+  return list.filter(g => g && g.connected && g.buttons && g.buttons.length).sort((p, q) => p.index - q.index);
+}
+function padToast(msg){
+  try {
+    let el = document.getElementById('padToast');
+    if(!el){
+      el = document.createElement('div'); el.id = 'padToast';
+      el.style.cssText = 'position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:99999;padding:8px 16px;background:rgba(10,12,24,.92);color:#fff;border:1px solid #6cf;border-radius:10px;font:600 14px system-ui,sans-serif;pointer-events:none;transition:opacity .4s';
+      document.body.appendChild(el);
+    }
+    el.textContent = msg; el.style.opacity = '1';
+    clearTimeout(padToastTimer);
+    padToastTimer = setTimeout(() => { el.style.opacity = '0'; }, 3200);
+  } catch(err){}
+}
+window.addEventListener('gamepadconnected', e => {
+  const nm = String(e.gamepad && e.gamepad.id || 'Manette').replace(/\s*\(.*$/, '').slice(0, 40);
+  padToast('🎮 Manette connectée : ' + nm);
+});
+window.addEventListener('gamepaddisconnected', () => padToast('🎮 Manette déconnectée'));
+
+function padRumble(ms, strong, weak){
+  try {
+    padList().forEach(gp => {
+      const act = gp.vibrationActuator;
+      if(act && act.playEffect) act.playEffect('dual-rumble', { startDelay: 0, duration: ms, strongMagnitude: strong, weakMagnitude: weak }).catch(() => {});
+      else if(gp.hapticActuators && gp.hapticActuators[0] && gp.hapticActuators[0].pulse) gp.hapticActuators[0].pulse(strong, ms);
+    });
+  } catch(err){}
+}
+
+// Appelé à chaque pas de simulation (60 Hz).
+function pollGamepads(){
+  const pads = padList();
+  padCount = pads.length;
+  const typing = document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
+  const settingsOpen = settingsOverlay && !settingsOverlay.classList.contains('hidden');
+  if(!pads.length || typing || settingsOpen){ padCtl = [null, null]; padPrev = { ...NO_PAD }; return; }
+  const reads = pads.map(padRead);
+  const merged = { ...NO_PAD };
+  reads.forEach(r => { Object.keys(NO_PAD).forEach(k => { if(r[k]) merged[k] = true; }); });
+  const orPads = (rs) => ({ left: rs.some(r => r.left), right: rs.some(r => r.right), down: rs.some(r => r.down), jump: rs.some(r => r.jump), shoot: rs.some(r => r.shoot) });
+  if(coopMode && reads.length >= 2){ padCtl = [orPads([reads[0]]), orPads(reads.slice(1))]; }
+  else padCtl = [orPads(reads), null];
+
+  // Navigation dans les menus : fronts montants (avec répétition pour les directions)
+  const now = performance.now();
+  const press = (name, fire) => {
+    if(merged[name] && !padPrev[name]){ padNextRepeat[name] = now + 380; fire(); }
+    else if(merged[name] && (state === STATE_MAP || state === STATE_CHARACTER) && now >= (padNextRepeat[name] || Infinity)){ padNextRepeat[name] = now + 120; fire(); }
+  };
+  if(state === STATE_DEVICE){
+    if(merged.a && !padPrev.a) chooseDevice(false);
+  } else {
+    press('left',  () => onKeyPress('ArrowLeft'));
+    press('right', () => onKeyPress('ArrowRight'));
+    press('up',    () => onKeyPress('ArrowUp'));
+    press('down',  () => onKeyPress('ArrowDown'));
+    press('a',     () => { onKeyPress(' '); });
+    press('x',     () => onKeyPress('e'));
+    press('y',     () => onKeyPress('r'));
+    press('b',     () => { if(state === STATE_MAP) onKeyPress('m'); else if(state === STATE_CHARACTER) onKeyPress('c'); });
+    press('select',() => onKeyPress('c'));
+    press('start', () => { if(merged.lb && merged.rb) onKeyPress('h'); else onKeyPress('m'); });
+  }
+  padPrev = merged;
+}
+
+function rawControlsP1(){
+  const g = padCtl[0] || {};
+  return {
+    left: isKeyDown('ArrowLeft') || isActionBindDown(KEYBINDS.left) || !!g.left,
+    right: isKeyDown('ArrowRight') || isActionBindDown(KEYBINDS.right) || !!g.right,
+    down: isKeyDown('ArrowDown') || isActionBindDown(KEYBINDS.down) || !!g.down,
+    jump: isKeyDown(' ') || isActionBindDown(KEYBINDS.jump) || !!g.jump,
+    shoot: isKeyDown('e') || isActionBindDown(KEYBINDS.shoot) || !!g.shoot
   };
 }
 
@@ -2542,12 +2670,13 @@ function controlsP1(){
 }
 
 function controlsP2(){
+  const g = padCtl[1] || {};
   return {
-    left: isKeyDown('j'),
-    right: isKeyDown('l'),
-    down: isKeyDown('k'),
-    jump: isKeyDown('i'),
-    shoot: isKeyDown('o')
+    left: isKeyDown('j') || !!g.left,
+    right: isKeyDown('l') || !!g.right,
+    down: isKeyDown('k') || !!g.down,
+    jump: isKeyDown('i') || !!g.jump,
+    shoot: isKeyDown('o') || !!g.shoot
   };
 }
 const PLAYER2_TINT = { accent: '#22c55e', accentLight: '#8be6a8' };
@@ -2559,6 +2688,7 @@ function getCharacterTinted(id, tint){
 function getCharacterP2(){ return getCharacterTinted(currentCharacterId, PLAYER2_TINT); }
 
 const ONLINE_TINTS = [null, PLAYER2_TINT, { accent:'#f59e0b', accentLight:'#fde68a' }, { accent:'#a855f7', accentLight:'#e9d5ff' }];
+let serverOffset = 0;
 let fbApp = null, fbDB = null;
 try {
   fbApp = firebase.initializeApp({
@@ -2575,24 +2705,33 @@ try {
   // Si ça oscille souvent entre true/false, la connexion est instable (coupures/reconnexions),
   // ce qui provoque exactement le genre de à-coups signalés.
   fbDB.ref('.info/connected').on('value', snap => { fbConnected = snap.val(); });
+  fbDB.ref('.info/serverTimeOffset').on('value', snap => { serverOffset = Number(snap.val()) || 0; });
 } catch(e){ console.warn('Firebase indisponible :', e); }
 
 let onlineMode = false;
 let isHost = false;
 let roomCode = null;
-let onlinePlayerLives = {}; // vies individuelles en ligne : { [id joueur]: nombre de vies }
+let onlinePlayerLives = {}; // (hôte) vies individuelles en ligne : { [id joueur]: nombre de vies }
+let onlineAck = {};         // (hôte) dernier "coup reçu" traité par joueur (l'invité s'en sert pour afficher ses vies sans attendre le réseau)
 const myId = 'p_' + Math.random().toString(36).slice(2, 9);
-let onlineRoomRef = null, onlineInputsRef = null, onlineStateRef = null, onlinePlayersRef = null, onlinePresenceRef = null, onlineChatRef = null;
-let remoteInputs = {};
+let onlineRoomRef = null, onlineStateRef = null, onlinePlayersRef = null, onlinePresenceRef = null, onlineChatRef = null;
+let onlinePStateAllRef = null, onlinePStateRef = null, onlineEventsRef = null;
 let onlineMeta = {};
-let onlineHostPlayers = {};
-let remoteSnapshot = null;
-let renderPlayers = {}; // positions lissées (invité) pour les AUTRES joueurs (pas de prédiction possible, on n'a pas leurs touches)
-let lastRemoteSnapshotT = null; // sert à détecter précisément l'arrivée d'un NOUVEAU paquet réseau (vs la même donnée relue plusieurs frames de suite)
-const DEBUG_SHOW_COORDS = true; // affiche la coordonnée X monde réelle de chaque joueur sous son pseudo, en ligne — utile pour vérifier objectivement la synchro entre plusieurs fenêtres (à repasser à false une fois les tests terminés)
-let myPredPlayer = null; // instance Player simulée localement à 60 fps chez l'invité, pour SON PROPRE personnage (prédiction côté client)
-let lastKnownLives = null; // sert à détecter une perte de vie (dégâts/mort) pour recaler le perso prédit, sans comparer de positions
-let onlineWorld = 0, onlineLevel = 0;
+let remoteSnapshot = null;       // dernier instantané du monde partagé reçu de l'hôte
+let snapTL = null;               // historique des instantanés de l'hôte (interpolation ennemis/tirs côté invité)
+let peerTL = {};                 // historiques d'état des AUTRES joueurs : { [id]: timeline }
+let peerLatest = {};             // dernier état brut reçu de chaque autre joueur
+const DEBUG_SHOW_COORDS = false; // true = affiche la coordonnée X réelle sous chaque pseudo (outil de diagnostic)
+let myPredPlayer = null;         // MON personnage, simulé localement à 60 Hz (hôte comme invité) => zéro latence sur mes commandes
+let myShots = [];                // (invité) mes tirs, affichés instantanément en local
+let hurtSeq = 0;                 // (invité) nombre de coups que j'ai encaissés (envoyés à l'hôte)
+let lastGuestLives = null;
+let lastNetState = null;
+let onlineWorld = -1, onlineLevel = -1, onlineLs = 0;
+let onlineLevelStartT = 0;       // identifiant de l'instance de niveau = heure serveur de son démarrage
+let onlinePlatTick = 0;          // horloge des plateformes mobiles, synchronisée sur l'heure serveur
+let localKilled = {}, stompSentAt = {};
+let projectileSeq = 0;
 
 // ===================== Mode spectateur (joueur éliminé en ligne) =====================
 // Un joueur qui a perdu toutes ses vies mais dont le salon continue (les autres ont encore
@@ -2710,20 +2849,21 @@ chatInput.addEventListener('keydown', (e) => {
 });
 
 function cleanupOnlineRefs(){
-  if(onlineInputsRef) onlineInputsRef.off();
   if(onlineStateRef) onlineStateRef.off();
   if(onlinePlayersRef) onlinePlayersRef.off();
+  if(onlinePStateAllRef) onlinePStateAllRef.off();
+  if(onlineEventsRef) onlineEventsRef.off();
+  if(onlinePStateRef){ onlinePStateRef.onDisconnect().cancel(); onlinePStateRef.remove().catch(()=>{}); }
   if(onlinePresenceRef) { onlinePresenceRef.onDisconnect().cancel(); onlinePresenceRef.remove().catch(()=>{}); }
   teardownChat();
-  onlineRoomRef = onlineInputsRef = onlineStateRef = onlinePlayersRef = onlinePresenceRef = null;
+  onlineRoomRef = onlineStateRef = onlinePlayersRef = onlinePresenceRef = onlinePStateRef = onlinePStateAllRef = onlineEventsRef = null;
 }
 
 function leaveOnlineRoom(){
   cleanupOnlineRefs();
   onlineMode = false; isHost = false; roomCode = null;
-  remoteInputs = {}; onlineMeta = {}; onlineHostPlayers = {}; onlinePlayerLives = {}; remoteSnapshot = null;
-  renderPlayers = {}; lastSentCoinsTaken = null; myPredPlayer = null; lastKnownLives = null;
-  spectateTargetId = null;
+  onlineMeta = {};
+  resetOnlineSession();
   document.getElementById('onlineLeaveBtn').style.display = 'none';
   onlineSetStatus('Non connecté.');
   state = STATE_MENU;
@@ -2733,15 +2873,19 @@ function createOnlineRoom(){
   if(!fbDB){ onlineSetStatus("Connexion à Firebase indisponible (vérifie ta config/connexion)."); return; }
   roomCode = randomRoomCode();
   isHost = true; onlineMode = true;
+  resetOnlineSession();
   onlineRoomRef = fbDB.ref('rooms/' + roomCode);
-  onlineInputsRef = onlineRoomRef.child('inputs');
   onlineStateRef = onlineRoomRef.child('state');
   onlinePlayersRef = onlineRoomRef.child('players');
   onlinePresenceRef = onlinePlayersRef.child(myId);
+  onlinePStateAllRef = onlineRoomRef.child('pstate');
+  onlinePStateRef = onlinePStateAllRef.child(myId);
+  onlineEventsRef = onlineRoomRef.child('events');
 
   onlineRoomRef.child('meta').set({ hostId: myId, createdAt: Date.now() });
   onlinePresenceRef.set({ charId: currentCharacterId, slot: 0, joinedAt: Date.now(), name: playerName });
   onlinePresenceRef.onDisconnect().remove();
+  onlinePStateRef.onDisconnect().remove();
 
   onlineMeta = { [myId]: { charId: currentCharacterId, slot: 0, name: playerName } };
   onlinePlayersRef.on('value', snap => {
@@ -2750,17 +2894,21 @@ function createOnlineRoom(){
     const newMeta = {};
     ids.forEach((id, i) => { newMeta[id] = { charId: val[id].charId || 'zkr', slot: i, name: (val[id].name && String(val[id].name).slice(0,14)) || 'Joueur' }; });
     onlineMeta = newMeta;
-    Object.keys(onlineHostPlayers).forEach(id => { if(!newMeta[id]){ delete onlineHostPlayers[id]; delete onlinePlayerLives[id]; } });
+    Object.keys(onlinePlayerLives).forEach(id => { if(!newMeta[id]){ delete onlinePlayerLives[id]; delete onlineAck[id]; } });
     onlineSetStatus(`Salon ${roomCode} — ${ids.length}/4 joueur(s) connecté(s). Partage ce code à tes amis !`);
   });
-  onlineInputsRef.on('value', snap => { remoteInputs = snap.val() || {}; });
+  onlinePStateAllRef.on('value', snap => onPeerStates(snap.val()));
+  onlineEventsRef.on('child_added', snap => {
+    const ev = snap.val();
+    snap.ref.remove().catch(() => {});
+    try { handleNetEvent(ev); } catch(err){ console.warn('Événement réseau ignoré :', err); }
+  });
 
   document.getElementById('onlineLeaveBtn').style.display = '';
   onlineSetStatus(`Salon créé : ${roomCode}`);
   setupChatForRoom();
 
   worldIndex = 0; levelIndex = 0; lives = 3; score = 0;
-  onlinePlayerLives = {};
   state = STATE_PLAYING; initLevel();
   closeSettings();
 }
@@ -2771,27 +2919,24 @@ function joinOnlineRoom(code){
   if(!code){ onlineSetStatus('Entre un code de salon.'); return; }
 
   onlineSetStatus(`Connexion au salon ${code}...`);
+  resetOnlineSession();
   // On s'abonne aux données du salon EN PARALLÈLE de la vérification d'existence
-  // (au lieu de faire les deux allers-retours réseau l'un après l'autre) :
-  // ça réduit sensiblement le temps d'attente pour rejoindre un salon.
+  // (au lieu de faire les deux allers-retours réseau l'un après l'autre).
   const candidateRoomRef = fbDB.ref('rooms/' + code);
   const candidatePlayersRef = candidateRoomRef.child('players');
   const candidateStateRef = candidateRoomRef.child('state');
   const candidatePresenceRef = candidatePlayersRef.child(myId);
   let joined = false;
 
-  candidatePlayersRef.on('value', snap2 => {
-    if(!joined) return;
-    const val = snap2.val() || {};
+  const readMeta = (val) => {
+    val = val || {};
     const ids = Object.keys(val).sort((a,b) => (val[a].joinedAt||0) - (val[b].joinedAt||0)).slice(0, 4);
     const newMeta = {};
     ids.forEach((id, i) => { newMeta[id] = { charId: val[id].charId || 'zkr', slot: i, name: (val[id].name && String(val[id].name).slice(0,14)) || 'Joueur' }; });
     onlineMeta = newMeta;
-  });
-  candidateStateRef.on('value', snap2 => {
-    if(!joined) return;
-    remoteSnapshot = snap2.val() || null;
-  });
+  };
+  candidatePlayersRef.on('value', snap2 => { if(joined) readMeta(snap2.val()); });
+  candidateStateRef.on('value', snap2 => { pushSnapshot(snap2.val()); });
 
   candidateRoomRef.child('meta').once('value').then(snap => {
     if(!snap.exists()){
@@ -2802,30 +2947,25 @@ function joinOnlineRoom(code){
     joined = true;
     roomCode = code; isHost = false; onlineMode = true;
     onlineRoomRef = candidateRoomRef;
-    onlineInputsRef = onlineRoomRef.child('inputs');
     onlineStateRef = candidateStateRef;
     onlinePlayersRef = candidatePlayersRef;
     onlinePresenceRef = candidatePresenceRef;
+    onlinePStateAllRef = onlineRoomRef.child('pstate');
+    onlinePStateRef = onlinePStateAllRef.child(myId);
+    onlineEventsRef = onlineRoomRef.child('events');
 
     onlinePresenceRef.set({ charId: currentCharacterId, slot: 99, joinedAt: Date.now(), name: playerName });
     onlinePresenceRef.onDisconnect().remove();
+    onlinePStateRef.onDisconnect().remove();
+    onlinePStateAllRef.on('value', s => onPeerStates(s.val()));
 
     // Le tout premier événement 'value' de candidatePlayersRef a pu arriver AVANT que `joined`
-    // soit vrai (il était alors ignoré ci-dessus). On force donc une relecture immédiate pour être
-    // sûr d'avoir les métadonnées des autres joueurs dès l'entrée dans le salon.
-    candidatePlayersRef.once('value').then(snap2 => {
-      const val = snap2.val() || {};
-      const ids = Object.keys(val).sort((a,b) => (val[a].joinedAt||0) - (val[b].joinedAt||0)).slice(0, 4);
-      const newMeta = {};
-      ids.forEach((id, i) => { newMeta[id] = { charId: val[id].charId || 'zkr', slot: i, name: (val[id].name && String(val[id].name).slice(0,14)) || 'Joueur' }; });
-      onlineMeta = newMeta;
-    }).catch(() => {});
+    // soit vrai : on force une relecture pour avoir les métadonnées des autres joueurs tout de suite.
+    candidatePlayersRef.once('value').then(s2 => readMeta(s2.val())).catch(() => {});
 
     document.getElementById('onlineLeaveBtn').style.display = '';
     onlineSetStatus(`Connecté au salon ${roomCode}. En attente de l'hôte...`);
     setupChatForRoom();
-    remoteSnapshot = null; onlineWorld = -1; onlineLevel = -1;
-    renderPlayers = {}; myPredPlayer = null; lastKnownLives = null;
     state = STATE_PLAYING;
     closeSettings();
   }).catch(() => {
@@ -2834,19 +2974,26 @@ function joinOnlineRoom(code){
   });
 }
 
-function ensureOnlineLevel(w, l){
-  if(w === onlineWorld && l === onlineLevel && level) return;
-  onlineWorld = w; onlineLevel = l; worldIndex = w; levelIndex = l;
+// (invité) Régénère localement le niveau de l'hôte (déterministe) dès que l'instance de niveau change.
+function ensureOnlineLevel(snap){
+  const w = snap.world, l = snap.level, ls = snap.ls || 0;
+  if(w === onlineWorld && l === onlineLevel && ls === onlineLs && level) return;
+  onlineWorld = w; onlineLevel = l; onlineLs = ls; onlineLevelStartT = ls;
+  worldIndex = w; levelIndex = l;
   level = generateLevel(w, l);
   enemies = level.enemyData.map(e => new Enemy(e.x, e.y, e.left, e.right, e.speed, {
     ...e, kind: e.isBoss ? BOSS_KINDS[w] : ENEMY_KINDS[w]
   }));
-  if(!isHost){
-    if(!myPredPlayer) myPredPlayer = new Player();
-    const mySlot = (onlineMeta[myId] && onlineMeta[myId].slot) || 0;
-    myPredPlayer.reset(level.startX + mySlot*40, level.startY);
-  }
+  projectiles = []; myShots = []; particles = []; floatTexts = [];
+  localKilled = {}; stompSentAt = {};
+  onlinePlatTick = Math.max(0, (serverNow() - ls) / STEP_MS);
+  if(!myPredPlayer) myPredPlayer = new Player();
+  const s = mySpawn();
+  myPredPlayer.reset(s.x, s.y);
+  cameraX = 0;
+  triggerLevelFadeIn();
 }
+
 let stateBeforeDevice = STATE_MENU;
 
 let isMobile = false;
@@ -2898,16 +3045,13 @@ function checkLifeRegen(){
 function grantLifeRegenTick(){
   if(onlineMode){
     if(!isHost) return; // l'hôte est seul autoritaire sur les vies en ligne
-    Object.keys(onlineHostPlayers).forEach(id => {
-      const cur = onlinePlayerLives[id] ?? 0;
+    Object.keys(onlineMeta).forEach(id => {
+      const cur = onlinePlayerLives[id] ?? MAX_LIVES;
       if(cur >= MAX_LIVES) return;
       const wasEliminated = cur <= 0;
       onlinePlayerLives[id] = cur + 1;
-      if(wasEliminated){
-        const p = onlineHostPlayers[id];
-        const slot = (onlineMeta[id] && onlineMeta[id].slot) || 0;
-        p.reset(level.startX + slot*40, level.startY);
-      }
+      // l'hôte relance son propre perso ; un invité éliminé se relance lui-même en voyant ses vies remonter
+      if(wasEliminated && id === myId && myPredPlayer){ const sp = mySpawn(); myPredPlayer.reset(sp.x, sp.y); }
     });
   } else if(coopMode){
     if(lives < MAX_LIVES){ const wasEliminated = lives <= 0; lives++; if(wasEliminated) player.reset(level.startX, level.startY); }
@@ -2993,7 +3137,13 @@ function initLevel(){
   cameraX = 0; cameraX2 = 0;
   livesLostThisLevel = 0;
   triggerLevelFadeIn();
-  if(onlineMode && isHost){ onlineHostPlayers = {}; lastSentCoinsTaken = null; }
+  if(onlineMode && isHost){
+    onlineLevelStartT = serverNow(); onlineLs = onlineLevelStartT; onlineWorld = worldIndex; onlineLevel = levelIndex;
+    onlinePlatTick = 0; localKilled = {}; stompSentAt = {}; myShots = [];
+    if(!myPredPlayer) myPredPlayer = new Player();
+    const sp = mySpawn(); myPredPlayer.reset(sp.x, sp.y);
+    lastBroadcastState = -1;
+  }
 }
 
 function advanceAfterLevelClear(){
@@ -3018,14 +3168,14 @@ function advanceAfterLevelClear(){
 }
 
 function retryCurrentLevel(){
-  lives = 3; lives2 = 3;
+  lives = 3; lives2 = 3; resetOnlineLives();
   initLevel();
   state = STATE_PLAYING;
   saveGame();
 }
 
 function startNewGame(){
-  worldIndex = 0; levelIndex = 0; lives = 3; lives2 = 3; score = 0;
+  worldIndex = 0; levelIndex = 0; lives = 3; lives2 = 3; score = 0; resetOnlineLives();
   unlockedFlat = 0; checkpointWorld = 0; checkpointScore = 0;
   livesLostThisWorld = 0;
   state = STATE_PLAYING; initLevel();
@@ -3033,7 +3183,7 @@ function startNewGame(){
 }
 
 function respawnAtCheckpoint(){
-  worldIndex = checkpointWorld; levelIndex = 0; lives = 3; lives2 = 3; score = checkpointScore;
+  worldIndex = checkpointWorld; levelIndex = 0; lives = 3; lives2 = 3; score = checkpointScore; resetOnlineLives();
   state = STATE_PLAYING; initLevel();
   saveGame();
 }
@@ -3047,7 +3197,7 @@ function openMap(fromPause){
 function tryLaunchFromMap(){
   const flat = FLAT(mapCursorWorld, mapCursorLevel);
   if(flat > unlockedFlat) return;
-  worldIndex = mapCursorWorld; levelIndex = mapCursorLevel; lives = 3; lives2 = 3;
+  worldIndex = mapCursorWorld; levelIndex = mapCursorLevel; lives = 3; lives2 = 3; resetOnlineLives();
   checkpointWorld = mapCursorWorld; checkpointScore = score;
   state = STATE_PLAYING; initLevel();
   saveGame();
@@ -4134,312 +4284,514 @@ function damagePlayer(p){
   }
 }
 
-// ===================== BOUCLE HÔTE (multijoueur en ligne) =====================
-// L'hôte simule TOUT (physique de chaque joueur connecté, ennemis, boss, pièces, projectiles)
-// exactement comme en solo/coop local, en utilisant les touches reçues de chaque invité
-// (ou ses propres touches locales pour lui-même), puis diffuse un instantané compact.
-function ensureHostPlayer(id){
-  if(!onlineHostPlayers[id]){
-    const p = new Player();
-    const slot = (onlineMeta[id] && onlineMeta[id].slot) || 0;
-    p.reset(level.startX + slot*40, level.startY);
-    onlineHostPlayers[id] = p;
-  }
-  if(onlinePlayerLives[id] == null) onlinePlayerLives[id] = 3; // vies propres à chaque joueur connecté
+// ===================== NETCODE EN LIGNE (zéro décalage perceptible) =====================
+// Principe :
+//  - Chaque joueur simule SON PROPRE personnage localement à 60 Hz (aucune latence sur ses commandes)
+//    et publie son état ~30 fois/s dans rooms/<code>/pstate/<id>.
+//  - Chaque client lit directement l'état des autres joueurs (plus de relais par l'hôte) et les affiche
+//    par INTERPOLATION de capture : on rejoue leur mouvement avec un léger retard fixe (INTERP_DELAY).
+//    Le mouvement est fluide et identique sur tous les écrans, même si les paquets arrivent irrégulièrement.
+//  - L'hôte reste l'arbitre du monde partagé (ennemis, boss, tirs, score, vies, pièces, fin de niveau).
+//    Les invités lui envoient des ÉVÉNEMENTS (coup encaissé, ennemi écrasé, pièce, tir) ; leur propre
+//    réaction est immédiate en local, l'hôte ne fait qu'entériner.
+//  - Les ennemis / projectiles reçus de l'hôte sont eux aussi interpolés ; les plateformes mobiles
+//    suivent une horloge commune basée sur l'heure serveur.
+const STEP_MS = 1000 / 60;
+const NET_SEND_EVERY = 2;      // en pas de simulation (2 => 30 envois/s)
+const INTERP_DELAY = 110;      // retard d'affichage des éléments distants (ms) : absorbe la gigue réseau
+let lastBroadcastState = -1;
+let lastPstateSendTick = -999;
+
+function rnd1(v){ return Math.round(v * 10) / 10; }
+function nlerp(a, b, k){ return a + (b - a) * k; }
+function serverNow(){ return Math.round(Date.now() + serverOffset); }
+function mySlot(){ return (onlineMeta[myId] && onlineMeta[myId].slot) || 0; }
+function mySpawn(){ return { x: level.startX + mySlot() * 40, y: level.startY }; }
+function resetOnlineLives(){
+  if(onlineMode && isHost) Object.keys(onlineMeta).forEach(id => { onlinePlayerLives[id] = MAX_LIVES; });
+}
+function resetOnlineSession(){
+  onlineAck = {}; onlinePlayerLives = {};
+  peerTL = {}; peerLatest = {}; snapTL = null; remoteSnapshot = null;
+  myShots = []; hurtSeq = 0; lastGuestLives = null; lastNetState = null;
+  localKilled = {}; stompSentAt = {}; myPredPlayer = null; spectateTargetId = null;
+  lastBroadcastState = -1; lastPstateSendTick = -999;
+  onlineWorld = -1; onlineLevel = -1; onlineLs = 0;
+  projectiles = [];
 }
 
-const ONLINE_INPUT_STALE_MS = 350; // au-delà, on considère l'invité "gelé" (onglet en arrière-plan, coupure réseau...) et on arrête son perso plutôt que de le laisser courir seul vers un trou
-function getOnlineControlsFor(id){
-  if(id === myId) return controlsP1();
-  const inp = remoteInputs[id];
-  if(!inp) return {left:false,right:false,down:false,jump:false,shoot:false};
-  if(inp.t != null && (Date.now() - inp.t) > ONLINE_INPUT_STALE_MS){
-    return {left:false,right:false,down:false,jump:false,shoot:false};
+// ---------- Historiques horodatés (interpolation de capture) ----------
+// Les horloges des machines diffèrent : on estime, par expéditeur, le décalage minimal observé
+// (arrivée - envoi) et on affiche le passé de l'expéditeur avec un retard fixe par rapport à ce minimum.
+function newTimeline(clock){ return { off: null, buf: [], clock: clock || Date.now }; }
+function tlPush(tl, s){
+  const cand = tl.clock() - s.t;
+  tl.off = (tl.off == null) ? cand : Math.min(tl.off + 0.4, cand);
+  const buf = tl.buf, last = buf[buf.length - 1];
+  if(last && s.t <= last.t) return false;
+  buf.push(s);
+  if(buf.length > 24) buf.shift();
+  return true;
+}
+function tlShowTime(tl){ return tl.clock() - tl.off - INTERP_DELAY; }
+function tlBracket(tl, st){
+  const buf = tl.buf, n = buf.length;
+  if(!n) return null;
+  if(st <= buf[0].t) return { a: buf[0], b: buf[0], k: 0, over: 0 };
+  const last = buf[n - 1];
+  if(st >= last.t) return { a: last, b: last, k: 0, over: st - last.t };
+  for(let i = n - 1; i > 0; i--){
+    const a = buf[i - 1], b = buf[i];
+    if(st >= a.t) return { a, b, k: (st - a.t) / Math.max(1, b.t - a.t), over: 0 };
   }
-  return inp;
+  return { a: buf[0], b: buf[0], k: 0, over: 0 };
 }
 
-function updateOnlineHost(){
+function pushSnapshot(v){
+  if(!v || typeof v.t !== 'number') return;
+  if(!snapTL) snapTL = newTimeline(serverNow);
+  if(tlPush(snapTL, v)) remoteSnapshot = v;
+}
+
+function onPeerStates(val){
+  if(!onlineMode) return;
+  val = val || {};
+  Object.keys(val).forEach(id => {
+    if(id === myId) return;
+    const s = val[id];
+    if(!s || typeof s.t !== 'number' || typeof s.x !== 'number') return;
+    let tl = peerTL[id];
+    if(!tl) tl = peerTL[id] = newTimeline(Date.now);
+    const last = tl.buf[tl.buf.length - 1];
+    if(last){
+      if(last.ls !== s.ls) tl.buf.length = 0; // autre instance de niveau : on repart d'un historique vide
+      else if(Math.abs(s.x - last.x) > 300 || Math.abs(s.y - last.y) > 300) s.j = 1; // téléportation (mort/reset) : pas d'interpolation
+    }
+    if(tlPush(tl, s)) peerLatest[id] = s;
+  });
+  Object.keys(peerTL).forEach(id => { if(!val[id]){ delete peerTL[id]; delete peerLatest[id]; } });
+}
+
+// Position/état affichés d'un autre joueur, interpolés dans le passé proche.
+function peerRenderState(id){
+  const tl = peerTL[id];
+  if(!tl || !tl.buf.length) return null;
+  const br = tlBracket(tl, tlShowTime(tl));
+  if(!br) return null;
+  const a = br.a, b = br.b, k = br.k;
+  const pl = (a.m >= 0 && a.m === b.m && level && level.movingPlatforms[a.m]) ? level.movingPlatforms[a.m] : null;
+  let x, y, src;
+  if(a === b){
+    src = a;
+    if(pl){ x = pl.x + a.mx; y = pl.y + a.my; }
+    else { x = a.x + (a.vx || 0) * Math.min(br.over || 0, 50) / STEP_MS; y = a.y; }
+  } else if(b.j){
+    src = a; x = a.x; y = a.y;
+  } else {
+    src = (k < 0.5) ? a : b;
+    if(pl){ x = pl.x + nlerp(a.mx, b.mx, k); y = pl.y + nlerp(a.my, b.my, k); }
+    else { x = nlerp(a.x, b.x, k); y = nlerp(a.y, b.y, k); }
+  }
+  const pw = src.pw || 0;
+  return {
+    x, y, vx: nlerp(a.vx || 0, b.vx || 0, k),
+    facing: src.f || 1, onGround: !!src.g, crouch: !!src.c, inv: !!src.i,
+    aura: pw ? { powerupType: pw === 1 ? 'star' : 'speed', powerupTimer: 120 } : null
+  };
+}
+
+// ---------- Événements invité -> hôte ----------
+function pushEvent(ev){
+  if(!onlineEventsRef) return;
+  ev.id = myId; ev.ls = onlineLevelStartT;
+  if(ev.t == null) ev.t = serverNow();
+  onlineEventsRef.push(ev).catch(() => {});
+}
+
+function hostApplyHurt(id, q){
+  if(q != null){
+    if(q <= (onlineAck[id] || 0)) return;
+    onlineAck[id] = q;
+  }
   if(state !== STATE_PLAYING) return;
-  checkLifeRegen();
-  level.movingPlatforms.forEach(mp => mp.update(frameTick));
-
-  if(!onlineMeta[myId]) onlineMeta[myId] = { charId: currentCharacterId, slot: 0, name: playerName };
-  const ids = Object.keys(onlineMeta);
-  ids.forEach(id => ensureHostPlayer(id));
-  Object.keys(onlineHostPlayers).forEach(id => { if(!onlineMeta[id]){ delete onlineHostPlayers[id]; delete onlinePlayerLives[id]; } });
-
-  const allIds = Object.keys(onlineHostPlayers);
-  // Un joueur éliminé (0 vie) est gelé : plus de simulation/collision pour lui, mais il reste
-  // affiché aux autres et le reste de l'équipe peut continuer le niveau sans lui.
-  const activeIds = allIds.filter(id => (onlinePlayerLives[id] ?? 3) > 0);
-  activeIds.forEach(id => {
-    const p = onlineHostPlayers[id];
-    const controls = getOnlineControlsFor(id);
-    p.update(controls, level.solids);
-    if(controls.shoot){
-      const charDef = getCharacterTinted((onlineMeta[id] && onlineMeta[id].charId) || 'zkr', ONLINE_TINTS[(onlineMeta[id] && onlineMeta[id].slot) || 0]);
-      tryShootFor(p, charDef);
-    }
-  });
-
-  // Caméra hôte : centrée sur soi-même (myId), sauf si éliminé : dans ce cas on suit
-  // le joueur actuellement observé en mode spectateur.
-  if(amIEliminated()) ensureSpectateTarget(); else spectateTargetId = null;
-  let camFollowP = onlineHostPlayers[myId];
-  if(amIEliminated() && spectateTargetId && onlineHostPlayers[spectateTargetId]) camFollowP = onlineHostPlayers[spectateTargetId];
-  if(camFollowP){
-    cameraX += ((camFollowP.x + cameraLookahead(camFollowP) - WIDTH/3) - cameraX) * 0.1;
-    cameraX = Math.max(0, Math.min(cameraX, level.width - WIDTH));
-  }
-
-  activeIds.forEach(id => {
-    const p = onlineHostPlayers[id];
-    if(p.y > DEATH_Y && !isInSpawnZone(p)) damagePlayerOnline(id);
-  });
-
-  level.coins.forEach(c => {
-    if(c.taken) return;
-    for(const id of activeIds){
-      const p = onlineHostPlayers[id];
-      if(Math.hypot(p.x+p.w/2 - c.x, p.y+p.h/2 - c.y) < 35){ applyCoinPickup(c, p); if(id === myId) playSfx('coin'); break; }
-    }
-  });
-
-  const onlinePlayerList = activeIds.map(id => onlineHostPlayers[id]);
-  enemies.forEach(e => { if(e.alive) e.update(nearestPlayer(onlinePlayerList, e)); });
-  activeIds.forEach(id => {
-    const p = onlineHostPlayers[id];
-    enemies.forEach(e => {
-      if(!e.alive) return;
-      if(rectsOverlap(p.rect, e.rect)){
-        const starPower = p.powerupType === 'star';
-        if((p.vy > 0 && p.y + p.h - p.vy <= e.y + 15) || starPower){
-          if(starPower) e.hp = 1; // l'étoile élimine en un coup, même les ennemis à plusieurs points de vie
-          if(p.vy > 0) p.vy = -10;
-          resolveEnemyHit(e, '#ffcf5f', '#ffcf5f');
-          if(id === myId) playSfx(e.isBoss ? 'boss' : 'stomp');
-        } else if(p.invincibleTimer <= 0 && p.powerupType !== 'star' && !isInSpawnZone(p)){ damagePlayerOnline(id); }
-      }
-    });
-  });
-
-  projectiles.forEach(p => { if(!p.dead) p.update(level.solids); });
-  enemies.forEach(e => {
-    if(!e.alive) return;
-    for(const p of projectiles){
-      if(p.hostile) continue; // les tirs du boss ne blessent pas les ennemis
-      if(!p.dead && rectsOverlap(p.rect, e.rect)){
-        p.dead = true;
-        resolveEnemyHit(e, '#8ad4ff', '#8ad4ff');
-        break;
-      }
-    }
-  });
-  activeIds.forEach(id => {
-    const p = onlineHostPlayers[id];
-    for(const pr of projectiles){
-      if(pr.hostile && !pr.dead && rectsOverlap(p.rect, pr.rect)){
-        pr.dead = true;
-        if(p.invincibleTimer <= 0 && !isInSpawnZone(p)) damagePlayerOnline(id);
-      }
-    }
-  });
-  projectiles = projectiles.filter(p => !p.dead);
-
-  activeIds.forEach(id => {
-    const p = onlineHostPlayers[id];
-    level.spikes.forEach(s => { if(state === STATE_PLAYING && rectsOverlap(p.rect, s) && p.invincibleTimer <= 0 && !isInSpawnZone(p)) damagePlayerOnline(id); });
-  });
-
-  const bossAlive = enemies.some(e => e.isBoss && e.alive);
-  activeIds.forEach(id => {
-    const p = onlineHostPlayers[id];
-    if(level.bossBarrierX != null && bossAlive && p.x + p.w > level.bossBarrierX){
-      p.x = level.bossBarrierX - p.w;
-      if(p.vx > 0) p.vx = 0;
-    }
-  });
-
-  const atGoal = p => p.x + p.w > level.goalX && Math.abs((p.y + p.h) - level.goalY) < 120;
-  const goalReached = !bossAlive && activeIds.length > 0 && activeIds.every(id => atGoal(onlineHostPlayers[id]));
-  if(state === STATE_PLAYING && goalReached){
-    const coinsTotal = level.coins.length;
-    const coinsCollected = level.coins.filter(c => c.taken).length;
-    let stars = 1;
-    if(livesLostThisLevel === 0) stars++;
-    if(coinsTotal === 0 || coinsCollected === coinsTotal) stars++;
-    levelClearStars = stars; levelClearCoins = coinsCollected; levelClearCoinsTotal = coinsTotal;
-    if(stars === 3) perfectLevelsCount++; perfectLevelsPerWorld[worldIndex] = (perfectLevelsPerWorld[worldIndex]||0)+1;
-    state = STATE_LEVEL_CLEAR;
-    spawnConfetti();
-    if(myId) playSfx('levelclear');
-  }
-
-  if(frameTick - lastOnlineBroadcastTick >= ONLINE_BROADCAST_INTERVAL && onlineStateRef){
-    lastOnlineBroadcastTick = frameTick;
-    const playersSnap = {};
-    allIds.forEach(id => {
-      const p = onlineHostPlayers[id];
-      playersSnap[id] = { x: Math.round(p.x), y: Math.round(p.y), vx: Math.round(p.vx*10)/10, facing: p.facing, onGround: p.onGround, crouch: p.h === PLAYER_CROUCH_HEIGHT, inv: p.invincibleTimer > 0 ? 1 : 0, charId: (onlineMeta[id]&&onlineMeta[id].charId)||'zkr', slot: (onlineMeta[id]&&onlineMeta[id].slot)||0, lives: onlinePlayerLives[id] ?? 0 };
-    });
-    const payload = {
-      world: worldIndex, level: levelIndex, state,
-      players: playersSnap,
-      enemies: enemies.map(e => ({x: Math.round(e.x), y: Math.round(e.y), dir: e.dir, alive: e.alive, hp: e.hp, maxHp: e.maxHp})),
-      projectiles: projectiles.map(p => ({x: Math.round(p.x), y: Math.round(p.y), dir: p.dir, color: p.color, h: p.hostile ? 1 : 0})),
-      score, lives: { ...onlinePlayerLives }, t: Date.now()
-    };
-    // IMPORTANT : onlineStateRef.set() remplace TOUT le nœud à chaque appel. On doit donc TOUJOURS
-    // inclure coinsTaken dans le payload, sinon il disparaît de Firebase dès qu'un envoi ne le
-    // contient pas, et les pièces déjà ramassées "réapparaissent" côté invité.
-    payload.coinsTaken = level.coins.map(c => c.taken ? 1 : 0);
-    onlineStateRef.set(payload).catch(() => {});
-  }
-}
-
-function damagePlayerOnline(id){
-  if(state !== STATE_PLAYING) return;
-  const p = onlineHostPlayers[id];
-  if(!p || (onlinePlayerLives[id] ?? 0) <= 0) return; // déjà éliminé
-  spawnParticles(p.x+p.w/2, p.y+p.h/2, 10, '#ff4a4a', {spd:2.6, spdVar:2.2, life:20, size:3});
-  if(id === myId){ playSfx('hit'); damageFlashTimer = 16; }
-  livesLostThisLevel++;
-  livesLostThisWorld++;
+  if(onlinePlayerLives[id] == null) onlinePlayerLives[id] = MAX_LIVES;
+  if(onlinePlayerLives[id] <= 0) return;
+  livesLostThisLevel++; livesLostThisWorld++;
   onlinePlayerLives[id]--;
-  if(onlinePlayerLives[id] <= 0){ onlinePlayerLives[id] = 0; }
-  else { const slot = (onlineMeta[id] && onlineMeta[id].slot) || 0; p.reset(level.startX + slot*40, level.startY); }
-  // Game over du salon seulement quand TOUS les joueurs connectés ont perdu toutes leurs vies.
-  const ids = Object.keys(onlineHostPlayers);
-  if(ids.length > 0 && ids.every(pid => (onlinePlayerLives[pid] ?? 0) <= 0)){
+  if(onlinePlayerLives[id] < 0) onlinePlayerLives[id] = 0;
+  const ids = Object.keys(onlineMeta);
+  if(ids.length > 0 && ids.every(pid => (onlinePlayerLives[pid] ?? MAX_LIVES) <= 0)){
     state = STATE_GAME_OVER; saveGame();
   }
 }
 
-// ===================== BOUCLE INVITÉ (multijoueur en ligne) =====================
-// L'invité régénère localement le même niveau (déterministe), envoie ses touches à l'hôte,
-// ET simule maintenant lui-même la physique de SON PROPRE personnage à 60 fps (prédiction
-// côté client, avec réconciliation douce vers l'hôte). Les autres joueurs, les ennemis et les
-// pièces restent pilotés par les instantanés reçus de l'hôte (source de vérité pour le score,
-// les vies, les collisions et l'état du jeu).
-function updateOnlineGuest(){
-  if(frameTick - lastOnlineSendTick >= ONLINE_INPUT_SEND_INTERVAL && onlineInputsRef){
-    lastOnlineSendTick = frameTick;
-    onlineInputsRef.child(myId).set({...controlsP1(), t: Date.now()}).catch(() => {});
+// L'hôte encaisse un coup sur son propre personnage.
+function damagePlayerOnline(id){
+  if(state !== STATE_PLAYING) return;
+  if((onlinePlayerLives[id] ?? MAX_LIVES) <= 0) return;
+  hostApplyHurt(id, null);
+  if(id === myId && myPredPlayer && (onlinePlayerLives[id] ?? 0) > 0){
+    const s = mySpawn(); myPredPlayer.reset(s.x, s.y);
   }
-  if(!remoteSnapshot) return;
-  ensureOnlineLevel(remoteSnapshot.world, remoteSnapshot.level);
-  // Ne PAS écraser l'état local si le joueur a ouvert un menu local (sélection de personnage,
-  // carte) : sinon, dès qu'on appuie sur une touche pour ouvrir ce menu, la frame réseau
-  // suivante nous renvoie instantanément en jeu avant même que le menu s'affiche — c'est
-  // pour ça que l'écran de sélection de skin était inutilisable côté invité.
-  if(state !== STATE_CHARACTER && state !== STATE_MAP){
-    state = remoteSnapshot.state != null ? remoteSnapshot.state : STATE_PLAYING;
-  }
-  score = remoteSnapshot.score || 0;
-  lives = (remoteSnapshot.lives && remoteSnapshot.lives[myId] != null) ? remoteSnapshot.lives[myId] : 3;
+}
 
-  if(remoteSnapshot.coinsTaken){
-    remoteSnapshot.coinsTaken.forEach((taken, i) => { if(level.coins[i]) level.coins[i].taken = !!taken; });
+function spawnHostShot(owner, x, y, dir, color, t0){
+  if(!level) return;
+  const pr = new Projectile(x, y, dir, color, false);
+  pr.owner = owner; pr.t0 = t0;
+  // rattrapage de la latence : le tir est avancé du temps écoulé depuis qu'il a été tiré
+  const age = Math.max(0, Math.min(25, Math.round((serverNow() - t0) / STEP_MS)));
+  for(let i = 0; i < age && !pr.dead; i++) pr.update(level.solids);
+  if(!pr.dead) projectiles.push(pr);
+}
+
+function handleNetEvent(ev){
+  if(!ev || !isHost || !onlineMode || !level) return;
+  if(ev.k === 'hu'){ hostApplyHurt(ev.id, ev.q); return; }
+  if(state !== STATE_PLAYING || ev.ls !== onlineLevelStartT) return;
+  if(ev.k === 'sh'){
+    spawnHostShot(ev.id, ev.x, ev.y, ev.d, ev.c, ev.t);
+  } else if(ev.k === 'st'){
+    const e = enemies[ev.e];
+    if(e && e.alive){ if(ev.s) e.hp = 1; resolveEnemyHit(e, '#ffcf5f', '#ffcf5f'); }
+  } else if(ev.k === 'cn'){
+    const c = level.coins[ev.i];
+    if(c && !c.taken) applyCoinPickup(c, { powerupType: null, powerupTimer: 0 }, true);
   }
-  if(remoteSnapshot.enemies){
-    remoteSnapshot.enemies.forEach((es, i) => {
-      const e = enemies[i]; if(!e) return;
-      const dx = es.x - e.x, dy = es.y - e.y;
-      // Lissage : on avance progressivement vers la position reçue plutôt que de "sauter" dessus,
-      // sauf changement énorme (spawn/reset/changement de niveau) qu'on applique instantanément.
-      if(!e.alive || !es.alive || Math.abs(dx) > 250 || Math.abs(dy) > 250){ e.x = es.x; e.y = es.y; }
-      else { e.x += dx * 0.35; e.y += dy * 0.35; }
-      e.dir = es.dir; e.alive = es.alive; e.hp = es.hp; e.maxHp = es.maxHp;
-    });
+}
+
+// ---------- Mon personnage (hôte ET invité) ----------
+function fireOnlineShot(){
+  const p = myPredPlayer;
+  if(!p || p.shootCooldown > 0) return;
+  const meta = onlineMeta[myId] || {};
+  const charDef = getCharacterTinted(currentCharacterId, ONLINE_TINTS[(meta.slot || 0) % ONLINE_TINTS.length]);
+  const dir = p.facing;
+  const ox = dir > 0 ? p.x + p.w : p.x - 16;
+  const oy = p.y + p.h * 0.42;
+  const color = charDef.palette.accentLight;
+  p.shootCooldown = SHOOT_COOLDOWN;
+  const t0 = serverNow();
+  if(isHost){
+    spawnHostShot(myId, ox, oy, dir, color, t0);
+  } else {
+    const pr = new Projectile(ox, oy, dir, color, false);
+    pr.owner = myId;
+    myShots.push(pr);
+    pushEvent({ k: 'sh', x: rnd1(ox), y: rnd1(oy), d: dir, c: color, t: t0 });
   }
-  projectiles = (remoteSnapshot.projectiles || []).map(p => {
-    const pr = new Projectile(p.x, p.y, p.dir, p.color, !!p.h); pr.life = PROJECTILE_LIFE; return pr;
+}
+
+function hurtMe(){
+  const p = myPredPlayer;
+  if(!p) return;
+  triggerShake(6, 14);
+  damageFlashTimer = 16;
+  spawnParticles(p.x + p.w/2, p.y + p.h/2, 10, '#ff4a4a', {spd:2.6, spdVar:2.2, life:20, size:3});
+  playSfx('hit');
+  if(isHost){
+    damagePlayerOnline(myId);
+  } else {
+    hurtSeq++;
+    lives = Math.max(0, lives - 1);
+    lastGuestLives = lives;
+    pushEvent({ k: 'hu', q: hurtSeq });
+    if(lives > 0){ const s = mySpawn(); p.reset(s.x, s.y); }
+  }
+}
+
+// Physique + interactions de MON personnage : réaction immédiate, l'hôte entérine via événements.
+function onlineLocalStep(){
+  const p = myPredPlayer;
+  if(!p || !level || state !== STATE_PLAYING) return;
+  const myLives = isHost ? (onlinePlayerLives[myId] ?? MAX_LIVES) : lives;
+  if(myLives <= 0) return;
+  const controls = controlsP1();
+  p.update(controls, level.solids);
+  if(controls.shoot) fireOnlineShot();
+  if(p.y > DEATH_Y && !isInSpawnZone(p)){ hurtMe(); return; }
+
+  const bossAlive = enemies.some(e => e.isBoss && e.alive);
+  if(level.bossBarrierX != null && bossAlive && p.x + p.w > level.bossBarrierX){
+    p.x = level.bossBarrierX - p.w;
+    if(p.vx > 0) p.vx = 0;
+  }
+
+  for(let i = 0; i < level.coins.length; i++){
+    const c = level.coins[i];
+    if(c.taken) continue;
+    if(Math.hypot(p.x + p.w/2 - c.x, p.y + p.h/2 - c.y) < 35){
+      applyCoinPickup(c, p);
+      playSfx('coin');
+      if(!isHost) pushEvent({ k: 'cn', i });
+    }
+  }
+
+  for(let i = 0; i < enemies.length; i++){
+    const e = enemies[i];
+    if(!e.alive || !rectsOverlap(p.rect, e.rect)) continue;
+    const star = p.powerupType === 'star';
+    if((p.vy > 0 && p.y + p.h - p.vy <= e.y + 15) || star){
+      if(p.vy > 0) p.vy = -10;
+      triggerShake(e.isBoss ? 9 : 3, e.isBoss ? 16 : 8);
+      if(isHost){
+        if(star) e.hp = 1;
+        resolveEnemyHit(e, '#ffcf5f', '#ffcf5f');
+        playSfx(e.isBoss ? 'boss' : 'stomp');
+      } else if(frameTick - (stompSentAt[i] || -99) > 12){
+        stompSentAt[i] = frameTick;
+        pushEvent({ k: 'st', e: i, s: star ? 1 : 0 });
+        playSfx(e.isBoss ? 'boss' : 'stomp');
+        spawnParticles(e.x + e.w/2, e.y + e.h/2, e.isBoss ? 14 : 7, e.isBoss ? '#ff6a3c' : '#ffcf5f', {spd:2.4, spdVar:2, life:18, size:2.8});
+        if(!e.isBoss && (e.maxHp <= 1 || star)){ e.alive = false; localKilled[i] = frameTick; }
+      }
+    } else if(p.invincibleTimer <= 0 && !star && !isInSpawnZone(p)){
+      hurtMe(); return;
+    }
+  }
+
+  for(const pr of projectiles){
+    if(pr.hostile && !pr.dead && rectsOverlap(p.rect, pr.rect)){
+      pr.dead = true;
+      if(p.invincibleTimer <= 0 && !isInSpawnZone(p)){ hurtMe(); return; }
+    }
+  }
+  for(const s of level.spikes){
+    if(rectsOverlap(p.rect, s) && p.invincibleTimer <= 0 && !isInSpawnZone(p)){ hurtMe(); return; }
+  }
+}
+
+// Plateformes mobiles : horloge commune (heure serveur depuis le début du niveau), recalée en douceur.
+function updateOnlinePlatforms(){
+  if(!level) return;
+  onlinePlatTick += 1;
+  const diff = (serverNow() - onlineLevelStartT) / STEP_MS - onlinePlatTick;
+  if(Math.abs(diff) > 40) onlinePlatTick += diff; else onlinePlatTick += diff * 0.03;
+  level.movingPlatforms.forEach(mp => mp.update(onlinePlatTick));
+}
+
+// (invité) Ennemis et tirs de l'hôte : interpolés dans le passé proche (même base de temps pour tous).
+function applyNetWorldView(){
+  if(!snapTL || !snapTL.buf.length || !level) return;
+  const st = tlShowTime(snapTL);
+  const br = tlBracket(snapTL, st);
+  if(!br) return;
+  const a = br.a, b = br.b, k = br.k;
+  const ea = a.e || [], eb = b.e || [];
+  for(let i = 0; i < enemies.length; i++){
+    const e = enemies[i];
+    const sb = eb[i];
+    if(!sb) continue;
+    const sa = ea[i] || sb;
+    const src = (k < 0.5) ? sa : sb;
+    let x, y;
+    if(sa[3] === 1 && sb[3] === 1 && Math.abs(sb[0] - sa[0]) < 250 && Math.abs(sb[1] - sa[1]) < 250){
+      x = nlerp(sa[0], sb[0], k); y = nlerp(sa[1], sb[1], k);
+    } else { x = src[0]; y = src[1]; }
+    const snapAlive = src[3] === 1;
+    if(localKilled[i] && (!snapAlive || frameTick - localKilled[i] > 120)) delete localKilled[i];
+    if(e.hitFlash > 0) e.hitFlash--;
+    if(snapAlive && src[4] < e.hp) e.hitFlash = 10;
+    e.x = x; e.y = y; e.dir = src[2];
+    e.alive = snapAlive && !localKilled[i];
+    e.hp = src[4]; e.maxHp = src[5];
+    e.attackState = src[6] ? 'telegraph' : 'patrol';
+    e.attackKind = src[6] === 1 ? 'dash' : 'shoot';
+  }
+  // Tirs de l'hôte / des autres joueurs : position = fonction déterministe du temps
+  const list = (remoteSnapshot && remoteSnapshot.pr) || [];
+  const nets = [];
+  for(const d of list){
+    if(!d || d.o === myId) continue; // mes tirs sont déjà affichés en local
+    const elapsed = (st - d.t) / STEP_MS;
+    if(elapsed < 0 || elapsed > PROJECTILE_LIFE) continue;
+    const pr = new Projectile(d.x + d.d * PROJECTILE_SPEED * elapsed, d.y, d.d, d.c, d.h === 1);
+    let blocked = false;
+    for(const s of level.solids){ if(rectsOverlap(pr.rect, s)){ blocked = true; break; } }
+    if(!blocked) nets.push(pr);
+  }
+  // mes tirs locaux
+  myShots.forEach(pr => {
+    if(pr.dead) return;
+    pr.update(level.solids);
+    for(const e of enemies){ if(e.alive && rectsOverlap(pr.rect, e.rect)){ pr.dead = true; break; } }
   });
+  myShots = myShots.filter(pr => !pr.dead);
+  projectiles = myShots.concat(nets);
+}
 
-  // Interpolation des positions des AUTRES joueurs distants : au lieu de "courir après" la
-  // dernière position reçue (ce qui fait qu'à un instant T donné, chaque fenêtre affiche une
-  // position différente selon quand EXACTEMENT elle a reçu son dernier paquet), on extrapole
-  // en continu à 60 fps à partir de la dernière vitesse connue (dead reckoning). Ça donne une
-  // position estimée qui avance en temps réel entre deux paquets, au lieu de rester figée puis
-  // de sauter — et donc un rendu bien plus cohérent entre plusieurs fenêtres/joueurs.
-  if(remoteSnapshot.players){
-    const nowPerf = performance.now();
-    const isNewPacket = remoteSnapshot.t !== lastRemoteSnapshotT;
-    if(isNewPacket) lastRemoteSnapshotT = remoteSnapshot.t;
-    Object.keys(remoteSnapshot.players).forEach(id => {
-      if(id === myId) return; // son propre perso est prédit localement, voir plus bas
-      const ps = remoteSnapshot.players[id];
-      let rp = renderPlayers[id];
-      if(!rp){ rp = renderPlayers[id] = { x: ps.x, y: ps.y, baseX: ps.x, baseVx: ps.vx || 0, baseT: nowPerf }; }
-      if(isNewPacket){
-        const bigJump = Math.abs(ps.x - rp.x) > 250 || Math.abs(ps.y - rp.y) > 250;
-        if(bigJump){ rp.x = ps.x; rp.y = ps.y; } // téléportation réelle (mort, reset, changement de niveau)
-        rp.baseX = ps.x; rp.baseVx = ps.vx || 0; rp.baseT = nowPerf;
-      }
-      // Position estimée en continu à partir de la vitesse connue, bornée pour éviter de dériver
-      // si un paquet se perd en route (on ne fige jamais plus de ~12 frames d'extrapolation pure).
-      const framesElapsed = Math.min((nowPerf - rp.baseT) / (1000/60), 12);
-      const targetX = rp.baseX + rp.baseVx * framesElapsed;
-      rp.x += (targetX - rp.x) * 0.5;
-      rp.y += (ps.y - rp.y) * 0.35;
-      rp.facing = ps.facing; rp.vx = ps.vx; rp.onGround = ps.onGround;
-      rp.crouch = ps.crouch; rp.inv = ps.inv; rp.charId = ps.charId; rp.slot = ps.slot;
-    });
-    Object.keys(renderPlayers).forEach(id => { if(id !== myId && !remoteSnapshot.players[id]) delete renderPlayers[id]; });
-  }
-
-  // ===== PRÉDICTION CÔTÉ CLIENT pour SON PROPRE personnage =====
-  // On simule la physique localement à 60 fps, exactement comme le fait l'hôte, à partir de
-  // ses propres touches — au lieu d'attendre les paquets réseau (~12/s). Ça donne la même
-  // fréquence/réactivité des deux côtés et supprime l'effet "mou"/saturé au déplacement.
-  //
-  // IMPORTANT : on ne recale PAS en comparant en continu la position prédite à la position reçue
-  // de l'hôte, car cette dernière représente toujours "où j'étais il y a un aller-retour réseau"
-  // (RTT) — la comparer en direct revient à tirer le perso vers son propre passé, ce qui combat
-  // l'input et donne une sensation de lag pire qu'avant. On ne recale que sur un vrai événement
-  // de jeu sans ambiguïté (dégâts/mort), détecté via la baisse du nombre de vies.
-
-  if(state === STATE_PLAYING && myPredPlayer && level && lives > 0){
-    level.movingPlatforms.forEach(mp => mp.update(frameTick)); // nécessaire pour que les collisions locales (et leur affichage) restent justes
-
-    myPredPlayer.update(controlsP1(), level.solids);
-
-    // Rebond en sautant sur un ennemi : uniquement l'effet VISUEL (vy = -10), reproduit ici
-    // pour que ça se sente pareil que chez l'hôte. Le vrai résultat (ennemi tué/touché, score)
-    // reste calculé UNIQUEMENT par l'hôte et arrive via l'instantané (enemies, score) — on ne
-    // fait ici aucun dégât et on ne touche pas au score pour ne pas désynchroniser la partie.
-    enemies.forEach(e => {
-      if(!e.alive) return;
-      if(rectsOverlap(myPredPlayer.rect, e.rect) && myPredPlayer.vy > 0 && myPredPlayer.y + myPredPlayer.h - myPredPlayer.vy <= e.y + 15){
-        myPredPlayer.vy = -10;
-      }
-    });
-  }
-  if(lastKnownLives != null && lives < lastKnownLives && myPredPlayer && level){
-    const mySlot = (onlineMeta[myId] && onlineMeta[myId].slot) || 0;
-    myPredPlayer.reset(level.startX + mySlot*40, level.startY);
-  }
-  lastKnownLives = lives;
-
-  if(lives <= 0) ensureSpectateTarget(); else spectateTargetId = null;
-  let camTargetX = myPredPlayer ? myPredPlayer.x + cameraLookahead(myPredPlayer) : 0;
-  if(lives <= 0 && spectateTargetId){
-    const rp = renderPlayers[spectateTargetId] || (remoteSnapshot.players && remoteSnapshot.players[spectateTargetId]);
-    if(rp) camTargetX = rp.x + cameraLookahead(rp);
-  }
-  cameraX += ((camTargetX - WIDTH/3) - cameraX) * 0.1;
+function updateOnlineCamera(){
+  const p = myPredPlayer;
+  let target = p ? p.x + cameraLookahead(p) : null;
+  if(amIEliminated()){
+    ensureSpectateTarget();
+    const rs = spectateTargetId ? peerRenderState(spectateTargetId) : null;
+    if(rs) target = rs.x + rs.facing * Math.min(Math.abs(rs.vx), MOVE_SPEED) * 9;
+  } else spectateTargetId = null;
+  if(target == null || !level) return;
+  cameraX += ((target - WIDTH/3) - cameraX) * 0.1;
   cameraX = Math.max(0, Math.min(cameraX, level.width - WIDTH));
 }
 
+function sendMyState(){
+  const p = myPredPlayer;
+  if(!onlinePStateRef || !p || !level) return;
+  if(frameTick - lastPstateSendTick < NET_SEND_EVERY) return;
+  lastPstateSendTick = frameTick;
+  let m = -1, mx = 0, my = 0;
+  if(p.ridingPlatform){
+    const idx = level.movingPlatforms.indexOf(p.ridingPlatform);
+    if(idx >= 0){ m = idx; mx = rnd1(p.x - p.ridingPlatform.x); my = rnd1(p.y - p.ridingPlatform.y); }
+  }
+  onlinePStateRef.set({
+    x: rnd1(p.x), y: rnd1(p.y), vx: rnd1(p.vx), f: p.facing,
+    g: p.onGround ? 1 : 0, c: p.h === PLAYER_CROUCH_HEIGHT ? 1 : 0, i: p.invincibleTimer > 0 ? 1 : 0,
+    pw: p.powerupTimer > 0 ? (p.powerupType === 'star' ? 1 : (p.powerupType === 'speed' ? 2 : 0)) : 0,
+    m, mx, my, t: Date.now(), ls: onlineLevelStartT
+  }).catch(() => {});
+}
+
+// ===================== BOUCLE HÔTE =====================
+function updateOnlineHost(){
+  if(!level) return;
+  if(!onlineMeta[myId]) onlineMeta[myId] = { charId: currentCharacterId, slot: 0, name: playerName };
+  if(!myPredPlayer){ myPredPlayer = new Player(); const s = mySpawn(); myPredPlayer.reset(s.x, s.y); }
+  Object.keys(onlineMeta).forEach(id => { if(onlinePlayerLives[id] == null) onlinePlayerLives[id] = MAX_LIVES; });
+  Object.keys(onlinePlayerLives).forEach(id => { if(!onlineMeta[id]){ delete onlinePlayerLives[id]; delete onlineAck[id]; } });
+
+  if(state === STATE_PLAYING){
+    checkLifeRegen();
+    updateOnlinePlatforms();
+    onlineLocalStep();
+
+    if(state === STATE_PLAYING){
+      // cibles de l'IA des ennemis : moi + les autres joueurs encore en vie (dernier état connu)
+      const targets = [];
+      Object.keys(onlineMeta).forEach(id => {
+        if((onlinePlayerLives[id] ?? MAX_LIVES) <= 0) return;
+        if(id === myId){ targets.push(myPredPlayer); return; }
+        const s = peerLatest[id];
+        if(s && s.ls === onlineLevelStartT) targets.push({ x: s.x, y: s.y, w: PLAYER_WIDTH, h: s.c ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT });
+      });
+      enemies.forEach(e => { if(e.alive) e.update(nearestPlayer(targets, e)); });
+
+      projectiles.forEach(p => { if(!p.dead) p.update(level.solids); });
+      enemies.forEach(e => {
+        if(!e.alive) return;
+        for(const p of projectiles){
+          if(p.hostile) continue;
+          if(!p.dead && rectsOverlap(p.rect, e.rect)){
+            p.dead = true;
+            resolveEnemyHit(e, '#8ad4ff', '#8ad4ff');
+            break;
+          }
+        }
+      });
+      projectiles = projectiles.filter(p => !p.dead);
+
+      // fin de niveau : tous les joueurs encore en vie doivent être à l'arrivée
+      const bossAlive = enemies.some(e => e.isBoss && e.alive);
+      const activeIds = Object.keys(onlineMeta).filter(id => (onlinePlayerLives[id] ?? MAX_LIVES) > 0);
+      const atGoal = id => {
+        let r;
+        if(id === myId) r = myPredPlayer;
+        else {
+          const s = peerLatest[id];
+          if(!s || s.ls !== onlineLevelStartT) return false;
+          r = { x: s.x, y: s.y, w: PLAYER_WIDTH, h: s.c ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT };
+        }
+        return r.x + r.w > level.goalX && Math.abs((r.y + r.h) - level.goalY) < 120;
+      };
+      if(!bossAlive && activeIds.length > 0 && activeIds.every(atGoal)){
+        const coinsTotal = level.coins.length;
+        const coinsCollected = level.coins.filter(c => c.taken).length;
+        let stars = 1;
+        if(livesLostThisLevel === 0) stars++;
+        if(coinsTotal === 0 || coinsCollected === coinsTotal) stars++;
+        levelClearStars = stars; levelClearCoins = coinsCollected; levelClearCoinsTotal = coinsTotal;
+        if(stars === 3){ perfectLevelsCount++; perfectLevelsPerWorld[worldIndex] = (perfectLevelsPerWorld[worldIndex]||0)+1; }
+        state = STATE_LEVEL_CLEAR;
+        spawnConfetti();
+        playSfx('levelclear');
+      }
+    }
+  }
+
+  updateOnlineCamera();
+
+  // diffusion du monde partagé (immédiate à chaque changement d'état, sinon 30 Hz / ~5 Hz à l'arrêt)
+  const interval = state === STATE_PLAYING ? NET_SEND_EVERY : 12;
+  if(onlineStateRef && (state !== lastBroadcastState || frameTick - lastOnlineBroadcastTick >= interval)){
+    lastOnlineBroadcastTick = frameTick;
+    lastBroadcastState = state;
+    onlineStateRef.set({
+      world: worldIndex, level: levelIndex, state, ls: onlineLevelStartT,
+      score, lives: { ...onlinePlayerLives }, ack: { ...onlineAck },
+      e: enemies.map(e => [rnd1(e.x), rnd1(e.y), e.dir, e.alive ? 1 : 0, e.hp, e.maxHp, (e.isBoss && e.attackState === 'telegraph') ? (e.attackKind === 'dash' ? 1 : 2) : 0]),
+      pr: projectiles.map(p => ({ x: rnd1(p.x0), y: rnd1(p.y), d: p.dir, t: p.t0, h: p.hostile ? 1 : 0, c: p.color, o: p.owner || '' })),
+      ct: level.coins.map(c => c.taken ? '1' : '0').join(''),
+      cs: [levelClearStars, levelClearCoins, levelClearCoinsTotal],
+      t: serverNow()
+    }).catch(() => {});
+  }
+  if(state === STATE_PLAYING) sendMyState();
+}
+
+// ===================== BOUCLE INVITÉ =====================
+function updateOnlineGuest(){
+  const snap = remoteSnapshot;
+  if(!snap) return;
+  ensureOnlineLevel(snap);
+  if(state !== STATE_CHARACTER && state !== STATE_MAP){
+    state = snap.state != null ? snap.state : STATE_PLAYING;
+  }
+  if(snap.state === STATE_LEVEL_CLEAR && lastNetState !== STATE_LEVEL_CLEAR){ spawnConfetti(); playSfx('levelclear'); }
+  lastNetState = snap.state;
+  score = snap.score || 0;
+  if(snap.cs){ levelClearStars = snap.cs[0]; levelClearCoins = snap.cs[1]; levelClearCoinsTotal = snap.cs[2]; }
+
+  // Mes vies : valeur de l'hôte moins les coups que j'ai encaissés et qu'il n'a pas encore enregistrés.
+  const base = (snap.lives && snap.lives[myId] != null) ? snap.lives[myId] : MAX_LIVES;
+  const ack = (snap.ack && snap.ack[myId]) || 0;
+  const newLives = Math.max(0, base - Math.max(0, hurtSeq - ack));
+  if(lastGuestLives != null && lastGuestLives <= 0 && newLives > 0 && myPredPlayer && level){
+    const s = mySpawn(); myPredPlayer.reset(s.x, s.y); // ressuscité (régénération de vie / nouvelle partie)
+  }
+  lives = newLives; lastGuestLives = newLives;
+
+  if(typeof snap.ct === 'string'){
+    for(let i = 0; i < snap.ct.length; i++){
+      if(snap.ct.charCodeAt(i) === 49 && level.coins[i]) level.coins[i].taken = true;
+    }
+  }
+
+  updateOnlinePlatforms();
+  applyNetWorldView();
+  onlineLocalStep();
+  updateOnlineCamera();
+  if(state === STATE_PLAYING) sendMyState();
+}
+
+// Boucle à PAS FIXE 60 Hz : la simulation avance toujours à la même vitesse, quelle que soit la
+// fréquence d'affichage (60/120/144 Hz). Indispensable en ligne : sinon un écran 144 Hz ferait
+// courir son personnage 2,4x plus vite que chez les autres.
+let lastLoopTime = 0, loopAccumulator = 0;
 function gameLoop(){
-  // Filet de sécurité global : quoi qu'il arrive dans la frame (update OU dessin), on
-  // reprogramme toujours la frame suivante dans le `finally`. Avant ce correctif, la moindre
-  // exception non gérée arrêtait requestAnimationFrame pour de bon : le jeu se figeait
-  // complètement (HUD bloqué, joueurs figés donnant l'impression d'être invisibles/téléportés
-  // une fois la page rechargée).
+  // Filet de sécurité global : quoi qu'il arrive, la frame suivante est toujours reprogrammée.
   try {
-    gameLoopBody();
+    const now = performance.now();
+    if(!lastLoopTime) lastLoopTime = now;
+    let dt = now - lastLoopTime; lastLoopTime = now;
+    if(dt > 250) dt = 250;                           // onglet resté en arrière-plan
+    if(Math.abs(dt - STEP_MS) < 1.2) dt = STEP_MS;   // écrans 60 Hz : supprime la gigue du timer
+    loopAccumulator += dt;
+    let steps = 0;
+    while(loopAccumulator >= STEP_MS && steps < 6){
+      try { stepGame(); } catch(err){ console.error('Erreur stepGame (pas ignoré, boucle poursuivie) :', err); }
+      loopAccumulator -= STEP_MS; steps++;
+    }
+    if(loopAccumulator > STEP_MS * 2) loopAccumulator = 0;
+    renderGame();
   } catch(err){
     console.error('Erreur dans gameLoop (frame ignorée, boucle poursuivie) :', err);
   } finally {
@@ -4447,8 +4799,9 @@ function gameLoop(){
   }
 }
 
-function gameLoopBody(){
+function stepGame(){
   frameTick++;
+  pollGamepads();
   if(screenShakeTimer > 0){ screenShakeTimer--; if(screenShakeTimer <= 0) screenShakeMag = 0; }
   if(damageFlashTimer > 0) damageFlashTimer--;
   if(comboTimer > 0){ comboTimer--; if(comboTimer <= 0) comboCount = 0; }
@@ -4561,7 +4914,7 @@ function gameLoopBody(){
       if(livesLostThisLevel === 0) stars++;
       if(coinsTotal === 0 || coinsCollected === coinsTotal) stars++;
       levelClearStars = stars; levelClearCoins = coinsCollected; levelClearCoinsTotal = coinsTotal;
-    if(stars === 3) perfectLevelsCount++; perfectLevelsPerWorld[worldIndex] = (perfectLevelsPerWorld[worldIndex]||0)+1;
+    if(stars === 3){ perfectLevelsCount++; perfectLevelsPerWorld[worldIndex] = (perfectLevelsPerWorld[worldIndex]||0)+1; }
       state = STATE_LEVEL_CLEAR;
       spawnConfetti();
       playSfx('levelclear');
@@ -4575,7 +4928,9 @@ function gameLoopBody(){
   updateParticles();
   updateConfetti();
   updateFade();
+}
 
+function renderGame(){
   ctx.clearRect(0,0,WIDTH,HEIGHT);
   const theme = WORLD_THEMES[Math.min(worldIndex, WORLD_THEMES.length - 1)];
 
@@ -4729,49 +5084,38 @@ function gameLoopBody(){
       ctx.restore();
 
       if(onlineMode){
-        // Rendu multijoueur en ligne : on dessine chaque joueur connu (hôte : ses instances Player réelles ;
-        // invité : les positions reçues dans l'instantané), avec la teinte associée à son slot.
-        if(isHost){
-          Object.keys(onlineHostPlayers).forEach(id => {
-            const p = onlineHostPlayers[id];
-            const meta = onlineMeta[id] || {charId:'zkr', slot:0, name:'Joueur'};
-            const charDef = getCharacterTinted(meta.charId, ONLINE_TINTS[meta.slot % ONLINE_TINTS.length]);
-            drawGroundShadow(p.x - camX + p.w/2, p.y + p.h - 3, p.w*0.55);
-            if(p.onGround) drawSpeedLines(p.x - camX + p.w/2, p.y, p.y+p.h, p.facing, Math.min(Math.abs(p.vx)/MOVE_SPEED,1));
-            if(p.invincibleTimer <= 0 || p.invincibleTimer % 8 < 5){
-              drawPlayerAura(p.x - camX, p.y, p.w, p.h, p);
-              drawPlayerSprite(p.x - camX, p.y, p.w, p.h, p.facing, p.vx, p.onGround, p.h === PLAYER_CROUCH_HEIGHT, frameTick, charDef, p.squash);
-            }
-            drawNameTag(p.x - camX + p.w/2, p.y, DEBUG_SHOW_COORDS ? `${meta.name || 'Joueur'} [x:${Math.round(p.x)}]` : (meta.name || 'Joueur'));
-          });
-        } else if(remoteSnapshot && remoteSnapshot.players){
-          Object.keys(remoteSnapshot.players).forEach(id => {
-            if(id === myId && myPredPlayer && lives > 0){
-              // Son propre personnage : dessiné depuis la simulation locale (60 fps, réactive),
-              // pas depuis le dernier paquet réseau reçu. (Si éliminé, on tombe dans la branche
-              // générique ci-dessous qui dessine la position figée reçue de l'hôte.)
-              const meta = onlineMeta[myId] || {charId: currentCharacterId, slot: 0, name: playerName};
-              const charDef = getCharacterTinted(meta.charId || currentCharacterId, ONLINE_TINTS[meta.slot % ONLINE_TINTS.length]);
-              drawGroundShadow(myPredPlayer.x - camX + myPredPlayer.w/2, myPredPlayer.y + myPredPlayer.h - 3, myPredPlayer.w*0.55);
-              if(myPredPlayer.onGround) drawSpeedLines(myPredPlayer.x - camX + myPredPlayer.w/2, myPredPlayer.y, myPredPlayer.y+myPredPlayer.h, myPredPlayer.facing, Math.min(Math.abs(myPredPlayer.vx)/MOVE_SPEED,1));
-              if(myPredPlayer.invincibleTimer <= 0 || myPredPlayer.invincibleTimer % 8 < 5){
-                drawPlayerAura(myPredPlayer.x - camX, myPredPlayer.y, myPredPlayer.w, myPredPlayer.h, myPredPlayer);
-                drawPlayerSprite(myPredPlayer.x - camX, myPredPlayer.y, myPredPlayer.w, myPredPlayer.h, myPredPlayer.facing, myPredPlayer.vx, myPredPlayer.onGround, myPredPlayer.h === PLAYER_CROUCH_HEIGHT, frameTick, charDef, myPredPlayer.squash);
-              }
-              drawNameTag(myPredPlayer.x - camX + myPredPlayer.w/2, myPredPlayer.y, DEBUG_SHOW_COORDS ? `${meta.name || playerName} [x:${Math.round(myPredPlayer.x)}]` : (meta.name || playerName));
-              return;
-            }
-            const ps = renderPlayers[id] || remoteSnapshot.players[id];
-            const charDef = getCharacterTinted(ps.charId || 'zkr', ONLINE_TINTS[(ps.slot||0) % ONLINE_TINTS.length]);
-            const psH = ps.crouch ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT;
-            drawGroundShadow(ps.x - camX + PLAYER_WIDTH/2, ps.y + psH - 3, PLAYER_WIDTH*0.55);
-            if(ps.onGround) drawSpeedLines(ps.x - camX + PLAYER_WIDTH/2, ps.y, ps.y+psH, ps.facing, Math.min(Math.abs(ps.vx)/MOVE_SPEED,1));
-            if(!ps.inv || frameTick % 8 < 5){
-              drawPlayerSprite(ps.x - camX, ps.y, PLAYER_WIDTH, psH, ps.facing, ps.vx, ps.onGround, ps.crouch, frameTick, charDef);
-            }
-            const psName = (onlineMeta[id] && onlineMeta[id].name) || 'Joueur';
-            drawNameTag(ps.x - camX + PLAYER_WIDTH/2, ps.y, DEBUG_SHOW_COORDS ? `${psName} [x:${Math.round(ps.x)}]` : psName);
-          });
+        // Rendu multijoueur en ligne : les AUTRES joueurs sont affichés par interpolation (peerRenderState),
+        // MON personnage directement depuis ma simulation locale 60 Hz.
+        Object.keys(onlineMeta).forEach(id => {
+          if(id === myId) return;
+          const tl = peerTL[id];
+          if(!tl || !tl.buf.length || tl.buf[tl.buf.length - 1].ls !== onlineLevelStartT) return;
+          const rs = peerRenderState(id);
+          if(!rs) return;
+          const meta = onlineMeta[id] || {charId:'zkr', slot:0, name:'Joueur'};
+          const charDef = getCharacterTinted(meta.charId || 'zkr', ONLINE_TINTS[(meta.slot||0) % ONLINE_TINTS.length]);
+          const rh = rs.crouch ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT;
+          drawGroundShadow(rs.x - camX + PLAYER_WIDTH/2, rs.y + rh - 3, PLAYER_WIDTH*0.55);
+          if(rs.onGround) drawSpeedLines(rs.x - camX + PLAYER_WIDTH/2, rs.y, rs.y + rh, rs.facing, Math.min(Math.abs(rs.vx)/MOVE_SPEED, 1));
+          if(!rs.inv || frameTick % 8 < 5){
+            drawPlayerAura(rs.x - camX, rs.y, PLAYER_WIDTH, rh, rs.aura);
+            drawPlayerSprite(rs.x - camX, rs.y, PLAYER_WIDTH, rh, rs.facing, rs.vx, rs.onGround, rs.crouch, frameTick, charDef);
+          }
+          const nm = meta.name || 'Joueur';
+          drawNameTag(rs.x - camX + PLAYER_WIDTH/2, rs.y, DEBUG_SHOW_COORDS ? `${nm} [x:${Math.round(rs.x)}]` : nm);
+        });
+        if(myPredPlayer){
+          const p = myPredPlayer;
+          const meta = onlineMeta[myId] || {slot:0, name: playerName};
+          const charDef = getCharacterTinted(currentCharacterId, ONLINE_TINTS[(meta.slot||0) % ONLINE_TINTS.length]);
+          drawGroundShadow(p.x - camX + p.w/2, p.y + p.h - 3, p.w*0.55);
+          if(p.onGround) drawSpeedLines(p.x - camX + p.w/2, p.y, p.y+p.h, p.facing, Math.min(Math.abs(p.vx)/MOVE_SPEED,1));
+          if(p.invincibleTimer <= 0 || p.invincibleTimer % 8 < 5){
+            drawPlayerAura(p.x - camX, p.y, p.w, p.h, p);
+            drawPlayerSprite(p.x - camX, p.y, p.w, p.h, p.facing, p.vx, p.onGround, p.h === PLAYER_CROUCH_HEIGHT, frameTick, charDef, p.squash);
+          }
+          const nm = meta.name || playerName;
+          drawNameTag(p.x - camX + p.w/2, p.y, DEBUG_SHOW_COORDS ? `${nm} [x:${Math.round(p.x)}]` : nm);
         }
       } else {
         const drawables = coopMode
@@ -4837,7 +5181,7 @@ function gameLoopBody(){
     ctx.beginPath(); ctx.moveTo(0,50); ctx.lineTo(WIDTH,50); ctx.stroke();
     ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial';
     if(onlineMode){
-      const nbPlayers = isHost ? Object.keys(onlineHostPlayers).length : (remoteSnapshot && remoteSnapshot.players ? Object.keys(remoteSnapshot.players).length : 1);
+      const nbPlayers = Math.max(1, Object.keys(onlineMeta).length);
       const myOnlineLives = isHost ? (onlinePlayerLives[myId] ?? 0) : lives;
       const heartsW = drawHeartsHud(14, 10, myOnlineLives, theme.accent);
       drawScoreHud(14 + heartsW + 10, 10, score, theme.accent);
@@ -4867,7 +5211,7 @@ function gameLoopBody(){
     }
 
     {
-      const localP = onlineMode ? (isHost ? onlineHostPlayers[myId] : myPredPlayer) : player;
+      const localP = onlineMode ? myPredPlayer : player;
       let statusX = 14;
       if(comboCount > 1){ statusX += drawStatusChip(statusX, 56, `🔥 COMBO x${comboCount}`, [255,120,50]) + 8; }
       if(localP && localP.powerupType){
