@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>ZKR - Le Boss de la Street</title>
+<title>ZKR - Le Boss de la Street (Créateur de niveaux)</title>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 <style>
@@ -242,7 +242,7 @@
 <body>
 <div id="wrap">
   <canvas id="game" width="960" height="540"></canvas>
-  <div id="hint">Flèches : se déplacer &nbsp;|&nbsp; Espace : sauter &nbsp;|&nbsp; Bas : s'accroupir / glisser &nbsp;|&nbsp; E : tir à distance &nbsp;|&nbsp; M : carte &nbsp;|&nbsp; C : personnages &nbsp;|&nbsp; H : accueil &nbsp;|&nbsp; ⚙ : mode 2 joueurs local &nbsp;|&nbsp; 🎮 Manette : stick/croix + A sauter, X tir, Start carte</div>
+  <div id="hint">Flèches : se déplacer &nbsp;|&nbsp; Espace : sauter &nbsp;|&nbsp; Bas : s'accroupir / glisser &nbsp;|&nbsp; E : tir à distance &nbsp;|&nbsp; M : carte &nbsp;|&nbsp; C : personnages &nbsp;|&nbsp; H : accueil &nbsp;|&nbsp; ⚙ : mode 2 joueurs local &nbsp;|&nbsp; 🎮 Manette : stick/croix + A sauter, X tir, Start carte &nbsp;|&nbsp; N : créateur de niveaux</div>
 
   <div id="deviceOverlay">
     <div id="deviceBox">
@@ -2522,6 +2522,7 @@ function isActionBindDown(bind){
   return isKeyDown(bind);
 }
 let level = null, player = new Player(), enemies = [], keys = {};
+let customPlay = null;   // niveau créé en cours de jeu (voir créateur de niveaux)
 let projectiles = [];
 
 let coopMode = false;
@@ -3072,6 +3073,7 @@ const SAVE_KEY = 'zkr_save_v1';
 let savedData = null;
 
 function saveGame(){
+  if(customPlay) return;
   try{
     const data = {
       worldIndex, levelIndex, lives, lives2, score,
@@ -3231,12 +3233,15 @@ function tryShootFor(p, charDef){
 function tryShoot(){ tryShootFor(player, getCharacter(currentCharacterId)); }
 
 function goHome(){
+  if(customPlay){ customPlay = null; mkRestoreGame(customBackup); customBackup = null; }
   if(onlineMode){ leaveOnlineRoom(); }
   else { state = STATE_MENU; }
   playSfx('select');
 }
 
 function onKeyPress(key){
+  if(mkModalOpen()) return;
+  if(state === STATE_EDITOR){ editorKey(key); return; }
   if((key === 'h' || key === 'H') && state !== STATE_DEVICE){
     goHome();
     return;
@@ -3247,6 +3252,7 @@ function onKeyPress(key){
     if(key === ' ') startNewGame();
     else if(key === 'm' || key === 'M') openMap(false);
     else if(key === 'c' || key === 'C') openCharacterSelect(false);
+    else if(key === 'n' || key === 'N') mkOpenModal('hub');
   } else if(state === STATE_GAME_OVER){
     // En ligne, seul l'hôte fait autorité sur le monde/niveau : si l'invité relançait la partie
     // en local ici, ça régénérait un niveau chez lui avec des indices désynchronisés du tracking
@@ -3254,7 +3260,8 @@ function onKeyPress(key){
     // à tourner sur un niveau différent de celui simulé par l'hôte, qui reste seul juge des
     // dégâts/de la mort : ça donnait l'impression de "mourir pour rien". L'invité attend donc
     // simplement le prochain instantané de l'hôte (qui, lui, peut relancer).
-    if(onlineMode && !isHost) { /* no-op côté invité */ }
+    if(customPlay){ if(key === ' ') restartCustom(); else if(key === 'm' || key === 'M') exitCustom(); }
+    else if(onlineMode && !isHost) { /* no-op côté invité */ }
     else if(key === ' ') respawnAtCheckpoint();
     else if(key === 'm' || key === 'M') openMap(false);
   } else if(state === STATE_VICTORY){
@@ -3262,6 +3269,7 @@ function onKeyPress(key){
     else if(key === ' ') startNewGame();
     else if(key === 'm' || key === 'M') openMap(false);
   } else if(state === STATE_PLAYING){
+    if(customPlay){ if(key === 'm' || key === 'M' || key === 'Escape') exitCustom(); return; }
     if(onlineMode && amIEliminated() && (key === 'ArrowLeft' || key === KEYBINDS.left)) cycleSpectateTarget(-1);
     else if(onlineMode && amIEliminated() && (key === 'ArrowRight' || key === KEYBINDS.right)) cycleSpectateTarget(1);
     else if(key === 'm' || key === 'M') openMap(true);
@@ -3269,7 +3277,8 @@ function onKeyPress(key){
   } else if(state === STATE_LEVEL_CLEAR){
     // Même raison qu'au-dessus (STATE_GAME_OVER) : avancer de niveau doit rester une décision
     // exclusive de l'hôte en ligne, sinon l'invité désynchronise son propre niveau local.
-    if(onlineMode && !isHost) { /* no-op côté invité */ }
+    if(customPlay){ if(key === ' ' || key === 'Enter' || key === 'm' || key === 'M') exitCustom(); else if(key === 'r' || key === 'R' || key === 'e' || key === 'E') restartCustom(); }
+    else if(onlineMode && !isHost) { /* no-op côté invité */ }
     else if(key === ' ' || key === 'Enter') advanceAfterLevelClear();
     else if(key === 'r' || key === 'R' || key === 'e' || key === 'E') retryCurrentLevel();
     else if(key === 'm' || key === 'M') openMap(false);
@@ -3305,6 +3314,7 @@ window.addEventListener('keydown', e => {
     return;
   }
   if(HANDLED_KEYS.includes(e.key) || Object.values(KEYBINDS).includes(e.key)) e.preventDefault();
+  if(state === STATE_EDITOR && (e.key === 'Tab' || ((e.ctrlKey || e.metaKey) && ['s','z','y'].includes(String(e.key).toLowerCase())))) e.preventDefault();
   const isNewPress = !keys[e.key];
   keys[e.key] = true;
   if(isNewPress) onKeyPress(e.key);
@@ -3648,9 +3658,9 @@ function drawLevelClearPanel(){
   const hintContinue = isMobile ? 'SAUT' : 'ESPACE';
   const hintRetry = isMobile ? 'TIR' : 'R';
   const hintMap = isMobile ? '☰' : 'M';
-  drawPanelButton(px+panelW/2-95, py+204, 190, 48, 'CONTINUER', hintContinue, theme, true);
+  drawPanelButton(px+panelW/2-95, py+204, 190, 48, customPlay ? 'TERMINER' : 'CONTINUER', hintContinue, theme, true);
   drawPanelButton(px+panelW/2-172, py+264, 162, 42, 'REJOUER', hintRetry, theme, false);
-  drawPanelButton(px+panelW/2+10, py+264, 162, 42, 'CARTE', hintMap, theme, false);
+  drawPanelButton(px+panelW/2+10, py+264, 162, 42, customPlay ? 'QUITTER' : 'CARTE', hintMap, theme, false);
 
   ctx.restore();
 }
@@ -4772,6 +4782,1021 @@ function updateOnlineGuest(){
   if(state === STATE_PLAYING) sendMyState();
 }
 
+// ===================== CRÉATEUR DE NIVEAUX (style Mario Maker) =====================
+// Un niveau = un petit objet JSON (voir mkNewLevel). Il est :
+//   - édité dans l'éditeur (STATE_EDITOR), testé (obligatoire avant publication),
+//   - sauvegardé en local (localStorage), exportable en fichier .json,
+//   - publié dans la communauté (Firebase : levels/<id> = infos, levelData/<id> = niveau en JSON texte).
+// Le moteur de jeu existant joue le niveau tel quel (même physique, mêmes ennemis, mêmes biomes).
+const STATE_EDITOR = 7;
+const MK = { GRID: 20, MIN_W: 1280, MAX_W: 12000, MAX_BG: 450000, NAME_MAX: 40 };
+let customBackup = null;
+
+const mkClamp = (v, a, b, d) => { v = Number(v); return isFinite(v) ? Math.max(a, Math.min(b, v)) : d; };
+const mkClean = (s, n) => String(s == null ? '' : s).replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, n);
+
+function mkNewLevel(){
+  return {
+    v: 1, name: 'Mon niveau', author: playerName, theme: 0, w: 3200,
+    bg: null, bgMode: 'fit', bgDim: 0, deco: true,
+    start: [100, GROUND_Y - 80], goal: [3000, GROUND_Y],
+    ground: [[0, 3200]], blocks: [], plat: [], mov: [], spikes: [], coins: [], enemies: []
+  };
+}
+function mkClone(d){
+  return {
+    ...d, start: d.start.slice(), goal: d.goal.slice(),
+    ground: d.ground.map(a => a.slice()), blocks: d.blocks.map(a => a.slice()), plat: d.plat.map(a => a.slice()),
+    mov: d.mov.map(a => a.slice()), spikes: d.spikes.map(a => a.slice()), coins: d.coins.map(a => a.slice()),
+    enemies: d.enemies.map(e => ({ ...e }))
+  };
+}
+function mkNormalizeGround(d){
+  const segs = d.ground.map(s => [Math.min(s[0], s[1]), Math.max(s[0], s[1])]).filter(s => s[1] - s[0] >= MK.GRID).sort((a, b) => a[0] - b[0]);
+  const out = [];
+  segs.forEach(s => { const l = out[out.length - 1]; if(l && s[0] <= l[1]) l[1] = Math.max(l[1], s[1]); else out.push(s.slice()); });
+  d.ground = out;
+}
+// Nettoyage strict de tout niveau venant de l'extérieur (fichier, communauté) : valeurs bornées, tailles limitées.
+function mkSanitize(raw){
+  if(typeof raw === 'string'){ try { raw = JSON.parse(raw); } catch(e){ return null; } }
+  if(!raw || typeof raw !== 'object') return null;
+  const d = mkNewLevel();
+  d.name = mkClean(raw.name, MK.NAME_MAX) || 'Sans titre';
+  d.author = mkClean(raw.author, 14);
+  d.theme = Math.round(mkClamp(raw.theme, 0, WORLD_THEMES.length - 1, 0));
+  d.w = Math.round(mkClamp(raw.w, MK.MIN_W, MK.MAX_W, 3200) / 20) * 20;
+  d.bgMode = raw.bgMode === 'tile' ? 'tile' : 'fit';
+  d.bgDim = mkClamp(raw.bgDim, 0, 0.8, 0);
+  d.deco = raw.deco !== false;
+  d.bg = (typeof raw.bg === 'string' && raw.bg.length <= MK.MAX_BG && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/.test(raw.bg)) ? raw.bg : null;
+  const X = v => mkClamp(v, -400, MK.MAX_W + 600, 0), Y = v => mkClamp(v, -600, 1100, 0);
+  const arr = (a, max, fn) => Array.isArray(a) ? a.slice(0, max).map(fn).filter(Boolean) : [];
+  const rect = r => Array.isArray(r) ? [Math.round(X(r[0])), Math.round(Y(r[1])), Math.round(mkClamp(r[2], 20, 6000, 20)), Math.round(mkClamp(r[3], 20, 1200, 20))] : null;
+  const s = Array.isArray(raw.start) ? raw.start : [], g = Array.isArray(raw.goal) ? raw.goal : [];
+  d.start = [Math.round(X(s[0] ?? 100)), Math.round(mkClamp(s[1] ?? GROUND_Y - 80, -200, 800, GROUND_Y - 80))];
+  d.goal = [Math.round(X(g[0] ?? d.w - 200)), Math.round(mkClamp(g[1] ?? GROUND_Y, 100, 900, GROUND_Y))];
+  d.ground = arr(raw.ground, 300, a => Array.isArray(a) ? [Math.round(X(a[0])), Math.round(X(a[1]))] : null);
+  mkNormalizeGround(d);
+  d.blocks = arr(raw.blocks, 800, rect);
+  d.plat = arr(raw.plat, 800, rect);
+  d.spikes = arr(raw.spikes, 800, rect);
+  d.mov = arr(raw.mov, 120, m => {
+    const r = rect(m); if(!r) return null;
+    return [...r, m[4] === 'y' ? 'y' : 'x', Math.round(mkClamp(m[5], 10, 500, 100)), +mkClamp(m[6], 0.005, 0.09, 0.03).toFixed(4), +mkClamp(m[7], 0, 7, 0).toFixed(2)];
+  });
+  d.coins = arr(raw.coins, 1500, c => Array.isArray(c) ? [Math.round(X(c[0])), Math.round(Y(c[1])), (c[2] === 1 || c[2] === 2) ? c[2] : 0] : null);
+  d.enemies = arr(raw.enemies, 250, e => {
+    if(!e || typeof e !== 'object') return null;
+    const b = e.b ? 1 : 0, w = b ? 80 : 44, x = Math.round(X(e.x));
+    return { x, y: Math.round(Y(e.y)), l: Math.round(mkClamp(e.l, -400, MK.MAX_W + 600, x - 100)), r: Math.round(mkClamp(e.r, -400, MK.MAX_W + 600, x + w + 100)),
+      k: Math.round(mkClamp(e.k, 0, WORLD_THEMES.length - 1, 0)), s: +mkClamp(e.s, 0.5, 4, 1.5).toFixed(2), b, hp: Math.round(mkClamp(e.hp, 1, 30, 8)) };
+  });
+  return d;
+}
+// Empreinte des éléments de gameplay (pas du nom / du fond) : sert à savoir si le niveau a été modifié depuis sa dernière réussite.
+function mkSig(d){
+  const s = JSON.stringify([d.theme, d.w, d.start, d.goal, d.ground, d.blocks, d.plat, d.mov, d.spikes, d.coins, d.enemies]);
+  let h = 5381; for(let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return h + '/' + s.length;
+}
+function mkCount(d){ return d.blocks.length + d.plat.length + d.mov.length + d.spikes.length + d.coins.length + d.enemies.length + d.ground.length; }
+
+function mkBuildLevel(d){
+  const en = d.enemies.map(e => {
+    const b = !!e.b;
+    return { x: e.x, y: e.y, left: e.l, right: e.r, speed: e.s, w: b ? 80 : 44, h: b ? 100 : 58, isBoss: b, hp: b ? e.hp : 1, kind: b ? BOSS_KINDS[e.k] : ENEMY_KINDS[e.k] };
+  });
+  const lv = buildLevel({
+    segments: d.ground, platforms: d.plat, movingPlatforms: d.mov, coins: d.coins.map(c => [c[0], c[1]]), spikes: d.spikes,
+    enemies: en, goalX: d.goal[0], goalY: d.goal[1], width: d.w, startX: d.start[0], startY: d.start[1]
+  });
+  lv.coins.forEach((c, i) => { c.type = d.coins[i][2] === 1 ? 'star' : (d.coins[i][2] === 2 ? 'speed' : 'coin'); });
+  d.blocks.forEach(b => lv.groundRects.push({ x: b[0], y: b[1], w: b[2], h: b[3] }));
+  lv.solids = lv.groundRects.concat(lv.platformRects);
+  return lv;
+}
+
+// ---------- Fond personnalisé (image importée) ----------
+const mkImgCache = { src: null, img: null, ok: false };
+function mkGetBg(d){
+  if(!d.bg) return null;
+  if(mkImgCache.src !== d.bg){
+    mkImgCache.src = d.bg; mkImgCache.ok = false;
+    const im = new Image(); im.onload = () => { mkImgCache.ok = true; }; im.src = d.bg; mkImgCache.img = im;
+  }
+  return mkImgCache.ok ? mkImgCache.img : null;
+}
+function drawMakerBackground(d, theme, camX, viewW){
+  const g = ctx.createLinearGradient(0, 0, 0, HEIGHT); g.addColorStop(0, rgb(theme.bgTop)); g.addColorStop(1, rgb(theme.bgBottom));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, viewW, HEIGHT);
+  const im = mkGetBg(d);
+  if(im){
+    const par = 0.25;
+    if(d.bgMode === 'tile'){
+      const s = HEIGHT / im.height, w = Math.max(1, im.width * s);
+      let x = -((camX * par) % w); if(x > 0) x -= w;
+      for(; x < viewW; x += w) ctx.drawImage(im, Math.floor(x), 0, Math.ceil(w) + 1, HEIGHT);
+    } else {
+      const span = viewW + par * Math.max(0, d.w - viewW);
+      const s = Math.max(HEIGHT / im.height, span / im.width), w = im.width * s, h = im.height * s;
+      ctx.drawImage(im, -camX * par, (HEIGHT - h) / 2, w, h);
+    }
+    if(d.bgDim > 0){ ctx.fillStyle = `rgba(0,0,0,${d.bgDim})`; ctx.fillRect(0, 0, viewW, HEIGHT); }
+  }
+  if(d.deco) drawWorldDeco(d.theme, camX);
+}
+// Redimensionne / compresse une image importée (max 1280x720, JPEG) pour rester léger (publication en ligne).
+function mkImportImage(file){
+  return new Promise((resolve, reject) => {
+    if(!file || !/^image\//.test(file.type)){ reject(new Error('Ce fichier n\'est pas une image.')); return; }
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = () => {
+      try {
+        const sc = Math.min(1, 1280 / im.width, 720 / im.height);
+        const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(im.width * sc)); c.height = Math.max(1, Math.round(im.height * sc));
+        const cx = c.getContext('2d'); cx.fillStyle = '#000'; cx.fillRect(0, 0, c.width, c.height); cx.drawImage(im, 0, 0, c.width, c.height);
+        let q = 0.85, out = c.toDataURL('image/jpeg', q);
+        while(out.length > MK.MAX_BG && q > 0.3){ q -= 0.1; out = c.toDataURL('image/jpeg', q); }
+        URL.revokeObjectURL(url);
+        if(out.length > MK.MAX_BG) reject(new Error('Image trop lourde, choisis-en une plus petite.')); else resolve(out);
+      } catch(err){ reject(err); }
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image illisible.')); };
+    im.src = url;
+  });
+}
+
+// ---------- Jouer un niveau personnalisé avec le moteur normal ----------
+function mkSnapshotGame(){
+  return JSON.parse(JSON.stringify({
+    totalCoinsAllTime, bossesDefeated, worldsCompletedCount, victoriesCount, enemiesDefeatedAllTime, perfectLevelsCount, flawlessWorldsCount,
+    livesLostThisWorld, enemiesDefeatedPerWorld, coinsCollectedPerWorld, perfectLevelsPerWorld, flawlessByWorld,
+    worldIndex, levelIndex, lives, lives2, score
+  }));
+}
+function mkRestoreGame(s){
+  if(!s) return;
+  ({ totalCoinsAllTime, bossesDefeated, worldsCompletedCount, victoriesCount, enemiesDefeatedAllTime, perfectLevelsCount, flawlessWorldsCount,
+     livesLostThisWorld, enemiesDefeatedPerWorld, coinsCollectedPerWorld, perfectLevelsPerWorld, flawlessByWorld,
+     worldIndex, levelIndex, lives, lives2, score } = s);
+}
+function startCustomLevel(data, ret, pubId, localId){
+  if(onlineMode) return;
+  if(!customPlay) customBackup = mkSnapshotGame();   // les stats / déblocages du jeu normal ne sont pas touchés par les niveaux créés
+  customPlay = { data: mkClone(data), ret: ret || 'editor', pubId: pubId || null, localId: localId || null, cleared: false };
+  mkHideAllUI();
+  worldIndex = data.theme; levelIndex = 0; lives = 3; lives2 = 3; score = 0; comboCount = 0;
+  level = mkBuildLevel(customPlay.data);
+  player.reset(level.startX, level.startY);
+  if(coopMode) player2.reset(level.startX + 40, level.startY);
+  enemies = level.enemyData.map(e => new Enemy(e.x, e.y, e.left, e.right, e.speed, { ...e }));
+  projectiles = []; particles = []; floatTexts = [];
+  cameraX = 0; cameraX2 = 0; livesLostThisLevel = 0;
+  triggerLevelFadeIn();
+  state = STATE_PLAYING;
+}
+function restartCustom(){ if(customPlay) startCustomLevel(customPlay.data, customPlay.ret, customPlay.pubId, customPlay.localId); }
+function exitCustom(){
+  if(!customPlay) return;
+  const cp = customPlay;
+  customPlay = null;
+  mkRestoreGame(customBackup); customBackup = null;
+  projectiles = []; particles = []; floatTexts = []; confetti.length = 0;
+  if(cp.ret === 'editor'){ edShow(); }
+  else { state = STATE_MENU; mkOpenModal(cp.ret === 'community' ? 'community' : 'mine'); }
+}
+// Appelé depuis stepGame : détecte la réussite d'un niveau créé.
+function customStepHook(){
+  if(!customPlay || customPlay.cleared || state !== STATE_LEVEL_CLEAR) return;
+  customPlay.cleared = true;
+  if(customPlay.ret === 'editor'){
+    ED.clearedSig = mkSig(customPlay.data);
+    mkToast('✅ Niveau validé ! Tu peux maintenant le publier.');
+  } else if(customPlay.ret === 'mine' && customPlay.localId){
+    mkMarkCleared(customPlay.localId);
+    mkToast('✅ Niveau validé ! Tu peux maintenant le publier.');
+  } else if(customPlay.pubId && fbDB){
+    try { fbDB.ref('levels/' + customPlay.pubId + '/plays').transaction(n => (n || 0) + 1); } catch(e){}
+  }
+}
+
+// ===================== ÉDITEUR =====================
+const ED = {
+  data: null, cam: 0, tool: 'select', sel: null, drag: null, hover: null, grid: true, undo: [], redo: [],
+  kind: 0, bossKind: 0, hideUI: false, localId: null, pubId: null, clearedSig: null, dirty: false, pan: null, spaceDown: false
+};
+const MK_TOOLS = [
+  ['select', '🖱', 'Sélection / déplacer', 'V'], ['hand', '✋', 'Déplacer la vue (ou clic droit)', 'H'],
+  ['ground', '🟫', 'Sol : glisse pour tracer', 'G'], ['block', '🧱', 'Bloc solide', 'B'], ['plat', '▬', 'Plateforme traversable', 'P'],
+  ['mov', '↔', 'Plateforme mobile', 'M'], ['spike', '🔺', 'Pics', 'S'], ['coin', '🪙', 'Pièces (glisse pour en tracer)', 'C'],
+  ['star', '⭐', 'Étoile : invincibilité', 'T'], ['speed', '⚡', 'Éclair : vitesse', 'L'], ['enemy', '👾', 'Ennemi', 'E'],
+  ['boss', '👹', 'Boss', 'O'], ['start', '🚩', 'Point de départ', 'D'], ['goal', '🏁', 'Arrivée', 'F'], ['erase', '🧽', 'Gomme', 'X']
+];
+const EDG = () => MK.GRID;
+const edSn = v => Math.round(v / MK.GRID) * MK.GRID;
+const edSnF = v => Math.floor(v / MK.GRID) * MK.GRID;
+
+function edPushUndo(){
+  ED.undo.push(mkClone(ED.data)); if(ED.undo.length > 80) ED.undo.shift();
+  ED.redo.length = 0; ED.dirty = true;
+}
+function edUndo(){ if(!ED.undo.length) return; ED.redo.push(mkClone(ED.data)); ED.data = ED.undo.pop(); ED.sel = null; ED.dirty = true; mkRefreshProps(); mkRefreshBar(); }
+function edRedo(){ if(!ED.redo.length) return; ED.undo.push(mkClone(ED.data)); ED.data = ED.redo.pop(); ED.sel = null; ED.dirty = true; mkRefreshProps(); mkRefreshBar(); }
+function edSetTool(t){ ED.tool = t; if(t !== 'select') { ED.sel = null; mkRefreshProps(); } mkRefreshTools(); }
+function edClampCam(){ ED.cam = Math.max(0, Math.min(ED.cam, Math.max(0, ED.data.w - WIDTH))); }
+
+// ---------- Ouverture / fermeture ----------
+function edOpen(entry){
+  const d = entry ? mkSanitize(entry.data) : mkNewLevel();
+  if(!d) return;
+  if(!entry) d.author = playerName;
+  ED.data = d; ED.localId = entry ? entry.id : null; ED.pubId = entry ? (entry.pubId || null) : null;
+  ED.clearedSig = entry ? (entry.clearedSig || null) : null;
+  ED.undo = []; ED.redo = []; ED.sel = null; ED.cam = 0; ED.dirty = !entry; ED.tool = 'select';
+  edShow();
+}
+function edShow(){
+  state = STATE_EDITOR; mkHideAllUI(); mkShowEditorUI();
+  mkRefreshBar(); mkRefreshTools(); mkRefreshProps(); mkLayout();
+}
+function edQuit(){
+  if(ED.dirty && !confirm('Quitter l\'éditeur ? Les modifications non enregistrées seront perdues.')) return;
+  mkHideAllUI(); state = STATE_MENU;
+}
+function edTest(){
+  const d = ED.data;
+  if(!d.goal) { mkToast('Place d\'abord une arrivée 🏁'); return; }
+  startCustomLevel(d, 'editor');
+}
+
+// ---------- Géométrie ----------
+function edSurfaceBelow(x, y0){
+  const d = ED.data; let best = null;
+  const take = t => { if(t >= y0 - 12 && (best == null || t < best)) best = t; };
+  d.ground.forEach(s => { if(x >= s[0] && x <= s[1]) take(GROUND_Y); });
+  d.blocks.forEach(b => { if(x >= b[0] && x <= b[0] + b[2]) take(b[1]); });
+  d.plat.forEach(b => { if(x >= b[0] && x <= b[0] + b[2]) take(b[1]); });
+  d.mov.forEach(b => { if(x >= b[0] && x <= b[0] + b[2]) take(b[1]); });
+  return best;
+}
+const edEnemyW = e => e.b ? 80 : 44, edEnemyH = e => e.b ? 100 : 58;
+function edHit(wx, wy){
+  const d = ED.data, inR = (x, y, w, h, pad = 4) => wx >= x - pad && wx <= x + w + pad && wy >= y - pad && wy <= y + h + pad;
+  for(let i = d.enemies.length - 1; i >= 0; i--){ const e = d.enemies[i]; if(inR(e.x, e.y, edEnemyW(e), edEnemyH(e))) return { t: 'enemy', i }; }
+  for(let i = d.coins.length - 1; i >= 0; i--){ const c = d.coins[i]; if(Math.hypot(wx - c[0], wy - c[1]) < 16) return { t: 'coin', i }; }
+  if(inR(d.start[0], d.start[1], PLAYER_WIDTH, PLAYER_HEIGHT)) return { t: 'start' };
+  if(inR(d.goal[0] - 8, d.goal[1] - 140, 80, 140)) return { t: 'goal' };
+  for(let i = d.spikes.length - 1; i >= 0; i--){ const s = d.spikes[i]; if(inR(s[0], s[1], s[2], s[3])) return { t: 'spike', i }; }
+  for(let i = d.mov.length - 1; i >= 0; i--){ const s = d.mov[i]; if(inR(s[0], s[1], s[2], s[3])) return { t: 'mov', i }; }
+  for(let i = d.plat.length - 1; i >= 0; i--){ const s = d.plat[i]; if(inR(s[0], s[1], s[2], s[3])) return { t: 'plat', i }; }
+  for(let i = d.blocks.length - 1; i >= 0; i--){ const s = d.blocks[i]; if(inR(s[0], s[1], s[2], s[3], 0)) return { t: 'block', i }; }
+  return null;
+}
+function edGet(sel){
+  const d = ED.data; if(!sel) return null;
+  if(sel.t === 'enemy') return d.enemies[sel.i];
+  if(sel.t === 'coin') return d.coins[sel.i];
+  if(sel.t === 'spike') return d.spikes[sel.i];
+  if(sel.t === 'mov') return d.mov[sel.i];
+  if(sel.t === 'plat') return d.plat[sel.i];
+  if(sel.t === 'block') return d.blocks[sel.i];
+  if(sel.t === 'start') return d.start;
+  if(sel.t === 'goal') return d.goal;
+  return null;
+}
+function edDelete(sel){
+  if(!sel || sel.t === 'start' || sel.t === 'goal') return false;
+  const d = ED.data, map = { enemy: 'enemies', coin: 'coins', spike: 'spikes', mov: 'mov', plat: 'plat', block: 'blocks' };
+  if(!map[sel.t]) return false;
+  d[map[sel.t]].splice(sel.i, 1); return true;
+}
+function edHandles(){
+  const o = edGet(ED.sel); if(!o) return [];
+  const t = ED.sel.t;
+  if(t === 'plat' || t === 'spike') return [{ k: 'w', x: o[0] + o[2], y: o[1] + o[3] / 2 }];
+  if(t === 'block' || t === 'mov') return [{ k: 'wh', x: o[0] + o[2], y: o[1] + o[3] }];
+  if(t === 'enemy') return [{ k: 'l', x: o.l, y: o.y + edEnemyH(o) + 12 }, { k: 'r', x: o.r, y: o.y + edEnemyH(o) + 12 }];
+  return [];
+}
+function edCutGround(a, b){
+  const d = ED.data, out = [];
+  d.ground.forEach(s => {
+    if(b <= s[0] || a >= s[1]) { out.push(s); return; }
+    if(a > s[0]) out.push([s[0], a]);
+    if(b < s[1]) out.push([b, s[1]]);
+  });
+  d.ground = out; mkNormalizeGround(d);
+}
+
+// ---------- Placement ----------
+function edPlacePoint(tool, wx, wy){
+  const d = ED.data;
+  const inLevel = wx >= -20 && wx <= d.w + 20;
+  if(!inLevel) return false;
+  if(tool === 'coin' || tool === 'star' || tool === 'speed'){
+    const x = edSn(wx), y = edSn(wy);
+    if(d.coins.some(c => c[0] === x && c[1] === y)) return false;
+    if(d.coins.length >= 1500) { mkToast('Maximum de pièces atteint.'); return false; }
+    d.coins.push([x, y, tool === 'star' ? 1 : tool === 'speed' ? 2 : 0]); return true;
+  }
+  if(tool === 'mov'){
+    if(d.mov.length >= 120){ mkToast('Maximum de plateformes mobiles atteint.'); return false; }
+    d.mov.push([edSn(wx - 60), edSn(wy - 10), 120, 20, 'x', 100, 0.03, 0]); ED.sel = { t: 'mov', i: d.mov.length - 1 }; ED.tool = 'select'; return true;
+  }
+  if(tool === 'enemy' || tool === 'boss'){
+    if(d.enemies.length >= 250){ mkToast('Maximum d\'ennemis atteint.'); return false; }
+    const b = tool === 'boss' ? 1 : 0, w = b ? 80 : 44, h = b ? 100 : 58;
+    const x = edSn(wx - w / 2), cx = x + w / 2, sf = edSurfaceBelow(cx, wy);
+    const y = sf != null ? sf - h : edSn(wy - h / 2);
+    d.enemies.push({ x, y, l: x - (b ? 200 : 100), r: x + w + (b ? 200 : 100), k: b ? ED.bossKind : ED.kind, s: b ? 1.6 : 1.5, b, hp: 8 });
+    ED.sel = { t: 'enemy', i: d.enemies.length - 1 }; return true;
+  }
+  if(tool === 'start'){
+    const x = edSn(wx), sf = edSurfaceBelow(x + 21, wy);
+    d.start = [x, sf != null ? sf - 80 : edSn(wy - 40)]; return true;
+  }
+  if(tool === 'goal'){
+    const x = edSn(wx), sf = edSurfaceBelow(x, wy);
+    d.goal = [x, sf != null ? sf : edSn(wy)]; return true;
+  }
+  return false;
+}
+function edCommitRect(dr){
+  const d = ED.data, x0 = Math.min(dr.x0, dr.x1), x1 = Math.max(dr.x0, dr.x1), y0 = Math.min(dr.y0, dr.y1), y1 = Math.max(dr.y0, dr.y1);
+  const w = x1 - x0, h = y1 - y0;
+  if(dr.tool === 'ground'){ if(w < MK.GRID) return false; d.ground.push([x0, x1]); mkNormalizeGround(d); return true; }
+  if(dr.tool === 'block'){ if(d.blocks.length >= 800) return mkToast('Maximum de blocs atteint.'), false; d.blocks.push([x0, y0, Math.max(w, MK.GRID), Math.max(h, MK.GRID)]); return true; }
+  if(dr.tool === 'plat'){ if(d.plat.length >= 800) return mkToast('Maximum de plateformes atteint.'), false; d.plat.push([x0, dr.y0, Math.max(w, 40), 20]); return true; }
+  if(dr.tool === 'spike'){ if(d.spikes.length >= 800) return mkToast('Maximum de pics atteint.'), false; d.spikes.push([x0, dr.y0, Math.max(w, MK.GRID), 20]); return true; }
+  return false;
+}
+
+// ---------- Pointeur ----------
+function edPos(e){
+  const r = canvas.getBoundingClientRect();
+  const sx = (e.clientX - r.left) * WIDTH / r.width, sy = (e.clientY - r.top) * HEIGHT / r.height;
+  return { sx, sy, wx: sx + ED.cam, wy: sy };
+}
+canvas.addEventListener('pointerdown', e => {
+  if(state !== STATE_EDITOR || !ED.data) return;
+  e.preventDefault();
+  try { canvas.setPointerCapture(e.pointerId); } catch(err){}
+  const p = edPos(e); ED.hover = p;
+  if(e.button === 2 || e.button === 1 || ED.tool === 'hand' || ED.spaceDown){ ED.pan = { sx: p.sx, cam: ED.cam }; return; }
+  if(e.button !== 0) return;
+  const t = ED.tool, d = ED.data;
+  if(t === 'select'){
+    const hs = edHandles().find(h => Math.hypot(p.wx - h.x, p.wy - h.y) < 12);
+    if(hs){ ED.drag = { kind: 'handle', h: hs.k, pushed: false }; return; }
+    const hit = edHit(p.wx, p.wy);
+    ED.sel = hit; mkRefreshProps();
+    if(hit){ const o = edGet(hit); ED.drag = { kind: 'move', sx: p.wx, sy: p.wy, orig: JSON.parse(JSON.stringify(o)), pushed: false }; }
+    return;
+  }
+  if(t === 'erase'){
+    const hit = edHit(p.wx, p.wy);
+    if(hit && hit.t !== 'start' && hit.t !== 'goal'){ edPushUndo(); edDelete(hit); ED.sel = null; mkRefreshProps(); mkRefreshBar(); }
+    else if(p.wy >= GROUND_Y - 4){ ED.drag = { kind: 'cut', x0: edSnF(p.wx), x1: edSnF(p.wx) + MK.GRID }; }
+    return;
+  }
+  if(t === 'ground' || t === 'block' || t === 'plat' || t === 'spike'){
+    ED.drag = { kind: 'rect', tool: t, x0: edSnF(p.wx), y0: t === 'ground' ? GROUND_Y : edSnF(p.wy), x1: edSnF(p.wx) + MK.GRID, y1: edSnF(p.wy) + MK.GRID };
+    return;
+  }
+  if(t === 'coin'){ edPushUndo(); edPlacePoint('coin', p.wx, p.wy); ED.drag = { kind: 'paint', lx: p.wx, ly: p.wy }; mkRefreshBar(); return; }
+  edPushUndo();
+  if(edPlacePoint(t, p.wx, p.wy)){ mkRefreshProps(); mkRefreshTools(); mkRefreshBar(); } else ED.undo.pop();
+});
+canvas.addEventListener('pointermove', e => {
+  if(state !== STATE_EDITOR || !ED.data) return;
+  const p = edPos(e); ED.hover = p;
+  if(ED.pan){ ED.cam = ED.pan.cam - (p.sx - ED.pan.sx); edClampCam(); return; }
+  const dr = ED.drag; if(!dr) return;
+  if(dr.kind === 'rect'){
+    dr.x1 = edSn(p.wx);
+    dr.y1 = dr.tool === 'block' ? edSn(p.wy) : dr.y0 + 20;
+    if(dr.tool === 'block' && dr.y1 === dr.y0) dr.y1 = dr.y0 + MK.GRID;
+  } else if(dr.kind === 'cut'){ dr.x1 = edSn(p.wx); }
+  else if(dr.kind === 'paint'){
+    if(Math.hypot(p.wx - dr.lx, p.wy - dr.ly) >= 40){ if(edPlacePoint('coin', p.wx, p.wy)){ dr.lx = p.wx; dr.ly = p.wy; mkRefreshBar(); } }
+  } else if(dr.kind === 'move'){
+    const o = edGet(ED.sel); if(!o) return;
+    const dx = edSn(p.wx - dr.sx), dy = edSn(p.wy - dr.sy);
+    if(!dr.pushed && (dx || dy)){ dr.pushed = true; edPushUndoWithOrig(dr.orig); }
+    const t = ED.sel.t, a = dr.orig;
+    if(t === 'enemy'){ o.x = a.x + dx; o.y = a.y + dy; o.l = a.l + dx; o.r = a.r + dx; }
+    else if(t === 'coin'){ o[0] = a[0] + dx; o[1] = a[1] + dy; }
+    else if(t === 'start' || t === 'goal'){ o[0] = a[0] + dx; o[1] = a[1] + dy; }
+    else { o[0] = a[0] + dx; o[1] = a[1] + dy; }
+  } else if(dr.kind === 'handle'){
+    const o = edGet(ED.sel); if(!o) return;
+    if(!dr.pushed){ dr.pushed = true; edPushUndo(); }
+    const t = ED.sel.t;
+    if(dr.h === 'w') o[2] = Math.max(MK.GRID, edSn(p.wx - o[0]));
+    else if(dr.h === 'wh'){ o[2] = Math.max(MK.GRID, edSn(p.wx - o[0])); o[3] = t === 'mov' ? 20 : Math.max(MK.GRID, edSn(p.wy - o[1])); }
+    else if(dr.h === 'l') o.l = Math.min(edSn(p.wx), o.x);
+    else if(dr.h === 'r') o.r = Math.max(edSn(p.wx), o.x + edEnemyW(o));
+  }
+});
+// annule/rétablit proprement un déplacement : on enregistre l'état d'avant le premier mouvement
+function edPushUndoWithOrig(orig){
+  const snap = mkClone(ED.data), t = ED.sel.t, i = ED.sel.i;
+  const arrMap = { enemy: 'enemies', coin: 'coins', spike: 'spikes', mov: 'mov', plat: 'plat', block: 'blocks' };
+  if(t === 'start') snap.start = orig; else if(t === 'goal') snap.goal = orig; else snap[arrMap[t]][i] = orig;
+  ED.undo.push(snap); if(ED.undo.length > 80) ED.undo.shift(); ED.redo.length = 0; ED.dirty = true;
+}
+function edPointerUp(e){
+  if(state !== STATE_EDITOR || !ED.data) return;
+  if(ED.pan){ ED.pan = null; return; }
+  const dr = ED.drag; ED.drag = null; if(!dr) return;
+  if(dr.kind === 'rect'){ edPushUndo(); if(edCommitRect(dr)){ mkRefreshBar(); } else ED.undo.pop(); }
+  else if(dr.kind === 'cut'){ edPushUndo(); edCutGround(Math.min(dr.x0, dr.x1), Math.max(dr.x0, dr.x1)); }
+  else if(dr.kind === 'move' || dr.kind === 'handle'){ mkRefreshProps(); mkRefreshBar(); }
+}
+canvas.addEventListener('pointerup', edPointerUp);
+canvas.addEventListener('pointercancel', edPointerUp);
+canvas.addEventListener('wheel', e => {
+  if(state !== STATE_EDITOR) return;
+  e.preventDefault(); ED.cam += (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) * 0.8; edClampCam();
+}, { passive: false });
+canvas.addEventListener('mouseleave', () => { if(ED.hover) ED.hover = null; });
+
+// ---------- Clavier (appelé par onKeyPress) ----------
+function editorKey(key){
+  if(!ED.data) return;
+  const k = key.length === 1 ? key.toLowerCase() : key;
+  const ctrl = keys['Control'] || keys['Meta'];
+  if(ctrl && k === 'z'){ edUndo(); return; }
+  if(ctrl && (k === 'y')){ edRedo(); return; }
+  if(ctrl && k === 's'){ edSave(); return; }
+  if(k === 'Delete' || k === 'Backspace'){ if(ED.sel && ED.sel.t !== 'start' && ED.sel.t !== 'goal'){ edPushUndo(); edDelete(ED.sel); ED.sel = null; mkRefreshProps(); mkRefreshBar(); } return; }
+  if(k === 'Escape'){ ED.sel = null; edSetTool('select'); mkRefreshProps(); return; }
+  if(k === 'Tab'){ ED.hideUI = !ED.hideUI; mkShowEditorUI(); return; }
+  const m = { v: 'select', h: 'hand', g: 'ground', b: 'block', p: 'plat', m: 'mov', s: 'spike', c: 'coin', t: 'star', l: 'speed', e: 'enemy', o: 'boss', d: 'start', f: 'goal', x: 'erase' };
+  if(m[k]){ edSetTool(m[k]); return; }
+  if(k === 'u'){ ED.grid = !ED.grid; return; }
+}
+function editorStep(){
+  if(!ED.data) return;
+  const typing = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+  if(typing) return;
+  if(keys['ArrowLeft']) ED.cam -= 14; if(keys['ArrowRight']) ED.cam += 14;
+  edClampCam();
+  ED.spaceDown = !!keys[' '];
+  mkSyncScroll();
+}
+
+// ---------- Rendu ----------
+function renderEditor(){
+  const d = ED.data; if(!d) return;
+  const th = WORLD_THEMES[d.theme], cam = ED.cam;
+  drawMakerBackground(d, th, cam, WIDTH);
+  ctx.save(); ctx.translate(-cam, 0);
+
+  // zone hors niveau
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(cam - 10, 0, 10 - cam, HEIGHT);
+  if(d.w < cam + WIDTH) ctx.fillRect(d.w, 0, cam + WIDTH - d.w + 10, HEIGHT);
+  ctx.fillStyle = '#ffcf5f'; ctx.fillRect(-2, 0, 3, HEIGHT); ctx.fillRect(d.w - 1, 0, 3, HEIGHT);
+
+  // grille
+  if(ED.grid){
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 1; ctx.beginPath();
+    for(let x = Math.floor(cam / 20) * 20; x <= cam + WIDTH; x += 20){ if(x % 100 === 0) continue; ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, HEIGHT); }
+    for(let y = 0; y <= HEIGHT; y += 20){ if(y % 100 === 0) continue; ctx.moveTo(cam, y + 0.5); ctx.lineTo(cam + WIDTH, y + 0.5); }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.beginPath();
+    for(let x = Math.floor(cam / 100) * 100; x <= cam + WIDTH; x += 100){ ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, HEIGHT); }
+    for(let y = 0; y <= HEIGHT; y += 100){ ctx.moveTo(cam, y + 0.5); ctx.lineTo(cam + WIDTH, y + 0.5); }
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '10px Arial'; ctx.textAlign = 'left';
+    for(let x = Math.floor(cam / 500) * 500; x <= cam + WIDTH; x += 500) ctx.fillText(String(x), x + 3, HEIGHT - 4);
+  }
+
+  const solidRect = (x, y, w, h) => {
+    const r = { x, y, w, h };
+    ctx.fillStyle = rgb(th.ground); ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = rgb(th.groundTop); ctx.fillRect(x, y, w, 10);
+    try { drawGroundTexture(d.theme, r, cam); } catch(err){}
+  };
+  d.ground.forEach(s => { if(s[1] < cam - 50 || s[0] > cam + WIDTH + 50) return; solidRect(s[0], GROUND_Y, s[1] - s[0], HEIGHT - GROUND_Y + 80); });
+  d.blocks.forEach(b => solidRect(b[0], b[1], b[2], b[3]));
+  const platRect = (x, y, w, h, mv) => {
+    const r = { x, y, w, h };
+    ctx.fillStyle = rgb(th.platform); ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = rgb(th.platformTop); ctx.fillRect(x, y, w, 6);
+    try { drawPlatformTexture(d.theme, r); } catch(err){}
+    if(mv){
+      ctx.save(); ctx.strokeStyle = rgb(th.accent); ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+      ctx.fillStyle = rgb(th.accent); ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.fillText(mv === 'x' ? '↔' : '↕', x + w / 2, y + h / 2 + 4); ctx.restore();
+    }
+  };
+  d.plat.forEach(p => platRect(p[0], p[1], p[2], p[3]));
+  d.mov.forEach((m, i) => {
+    // trajet
+    ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.setLineDash([6, 5]); ctx.lineWidth = 1.5; ctx.beginPath();
+    if(m[4] === 'x'){ ctx.moveTo(m[0] - m[5], m[1] + m[3] / 2); ctx.lineTo(m[0] + m[2] + m[5], m[1] + m[3] / 2); }
+    else { ctx.moveTo(m[0] + m[2] / 2, m[1] - m[5]); ctx.lineTo(m[0] + m[2] / 2, m[1] + m[3] + m[5]); }
+    ctx.stroke(); ctx.restore();
+    platRect(m[0], m[1], m[2], m[3], m[4]);
+  });
+  ctx.fillStyle = rgb(th.spike);
+  d.spikes.forEach(r => { for(let x = r[0]; x < r[0] + r[2]; x += 20){ ctx.beginPath(); ctx.moveTo(x, r[1] + r[3]); ctx.lineTo(x + 10, r[1]); ctx.lineTo(x + 20, r[1] + r[3]); ctx.fill(); } });
+  d.coins.forEach(c => {
+    if(c[2] === 1) drawStar(c[0], c[1], 14, 6.5, '#ffe066');
+    else if(c[2] === 2){ ctx.fillStyle = '#5ad1ff'; ctx.beginPath(); ctx.moveTo(c[0] - 4, c[1] - 13); ctx.lineTo(c[0] + 6, c[1] - 2); ctx.lineTo(c[0], c[1] - 2); ctx.lineTo(c[0] + 4, c[1] + 13); ctx.lineTo(c[0] - 6, c[1] + 1); ctx.lineTo(c[0], c[1] + 1); ctx.closePath(); ctx.fill(); }
+    else { drawStar(c[0], c[1], 10, 4.5, '#ffd700'); drawStar(c[0], c[1], 6, 2.5, '#fff6b0'); }
+  });
+  d.enemies.forEach((e, i) => {
+    const w = edEnemyW(e), h = edEnemyH(e);
+    const sel = ED.sel && ED.sel.t === 'enemy' && ED.sel.i === i;
+    if(sel){ ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(e.l, e.y + h + 12); ctx.lineTo(e.r, e.y + h + 12); ctx.stroke(); ctx.setLineDash([]); }
+    else { ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(e.l, e.y + h + 12); ctx.lineTo(e.r, e.y + h + 12); ctx.stroke(); }
+    try { if(e.b) drawBossSprite(BOSS_KINDS[e.k], e.x, e.y, w, h, frameTick, 1); else drawEnemySprite(ENEMY_KINDS[e.k], e.x, e.y, w, h, frameTick, 1); } catch(err){}
+  });
+  // départ
+  try { drawPlayerSprite(d.start[0], d.start[1], PLAYER_WIDTH, PLAYER_HEIGHT, 1, 0, true, false, frameTick, getCharacter(currentCharacterId)); } catch(err){}
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.fillText('DÉPART', d.start[0] + PLAYER_WIDTH / 2, d.start[1] - 6);
+  // arrivée
+  ctx.fillStyle = '#3a3a3a'; ctx.fillRect(d.goal[0] - 5, d.goal[1] - 140, 8, 140);
+  ctx.fillStyle = rgb(th.accent); ctx.beginPath(); ctx.moveTo(d.goal[0] + 3, d.goal[1] - 140); ctx.lineTo(d.goal[0] + 68, d.goal[1] - 120); ctx.lineTo(d.goal[0] + 3, d.goal[1] - 100); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.fillText('ARRIVÉE', d.goal[0], d.goal[1] - 148);
+  if(d.enemies.some(e => e.b)){ ctx.strokeStyle = 'rgba(255,60,90,0.6)'; ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.moveTo(d.goal[0] - 90, 0); ctx.lineTo(d.goal[0] - 90, HEIGHT); ctx.stroke(); ctx.setLineDash([]); }
+
+  // sélection + poignées
+  if(ED.sel){
+    const o = edGet(ED.sel);
+    if(o){
+      let bx, by, bw, bh; const t = ED.sel.t;
+      if(t === 'enemy'){ bx = o.x; by = o.y; bw = edEnemyW(o); bh = edEnemyH(o); }
+      else if(t === 'coin'){ bx = o[0] - 14; by = o[1] - 14; bw = 28; bh = 28; }
+      else if(t === 'start'){ bx = o[0]; by = o[1]; bw = PLAYER_WIDTH; bh = PLAYER_HEIGHT; }
+      else if(t === 'goal'){ bx = o[0] - 8; by = o[1] - 140; bw = 76; bh = 140; }
+      else { bx = o[0]; by = o[1]; bw = o[2]; bh = o[3]; }
+      ctx.save(); ctx.strokeStyle = '#ffe14a'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.lineDashOffset = -frameTick * 0.5; ctx.strokeRect(bx - 3, by - 3, bw + 6, bh + 6); ctx.restore();
+      edHandles().forEach(h => { ctx.fillStyle = '#ffe14a'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(h.x, h.y, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); });
+    }
+  }
+  // aperçu de l'outil
+  const dr = ED.drag, hv = ED.hover;
+  ctx.save(); ctx.globalAlpha = 0.65;
+  if(dr && dr.kind === 'rect'){
+    const x0 = Math.min(dr.x0, dr.x1), x1 = Math.max(dr.x0, dr.x1), y0 = Math.min(dr.y0, dr.y1), y1 = Math.max(dr.y0, dr.y1);
+    ctx.fillStyle = '#7fe0ff'; ctx.fillRect(x0, dr.tool === 'ground' ? GROUND_Y : (dr.tool === 'block' ? y0 : dr.y0), Math.max(x1 - x0, 20), dr.tool === 'ground' ? HEIGHT - GROUND_Y : (dr.tool === 'block' ? Math.max(y1 - y0, 20) : 20));
+  } else if(dr && dr.kind === 'cut'){
+    ctx.fillStyle = '#ff6a6a'; ctx.fillRect(Math.min(dr.x0, dr.x1), GROUND_Y, Math.abs(dr.x1 - dr.x0) || 20, HEIGHT - GROUND_Y);
+  } else if(hv && !ED.pan && state === STATE_EDITOR){
+    const wx = hv.wx, wy = hv.wy;
+    if(['coin', 'star', 'speed'].includes(ED.tool)){ drawStar(edSn(wx), edSn(wy), 10, 4.5, ED.tool === 'speed' ? '#5ad1ff' : '#ffe066'); }
+    else if(ED.tool === 'enemy' || ED.tool === 'boss'){
+      const b = ED.tool === 'boss', w = b ? 80 : 44, h = b ? 100 : 58, x = edSn(wx - w / 2), sf = edSurfaceBelow(x + w / 2, wy), y = sf != null ? sf - h : edSn(wy - h / 2);
+      try { if(b) drawBossSprite(BOSS_KINDS[ED.bossKind], x, y, w, h, frameTick, 1); else drawEnemySprite(ENEMY_KINDS[ED.kind], x, y, w, h, frameTick, 1); } catch(err){}
+    } else if(ED.tool === 'mov'){ ctx.fillStyle = '#fff'; ctx.fillRect(edSn(wx - 60), edSn(wy - 10), 120, 20); }
+    else if(['ground', 'block', 'plat', 'spike', 'erase'].includes(ED.tool)){ ctx.fillStyle = '#fff'; ctx.fillRect(edSnF(wx), edSnF(wy), 20, 20); }
+    else if(ED.tool === 'start'){ ctx.fillStyle = '#fff'; ctx.fillRect(edSn(wx), edSn(wy - 40), 42, 76); }
+    else if(ED.tool === 'goal'){ ctx.fillStyle = '#fff'; ctx.fillRect(edSn(wx) - 4, edSn(wy) - 140, 8, 140); }
+  }
+  ctx.restore();
+  ctx.restore();
+
+  // indications
+  const hint = {
+    select: 'Clique un objet pour le sélectionner et le déplacer — Suppr pour l\'effacer.', hand: 'Glisse pour déplacer la vue.',
+    ground: 'Glisse horizontalement pour tracer du sol (les trous = vide mortel).', block: 'Glisse pour dessiner un bloc solide (murs, piliers…).',
+    plat: 'Glisse horizontalement : plateforme que l\'on peut traverser par en dessous.', mov: 'Clique pour poser une plateforme mobile, règle-la à droite.',
+    spike: 'Glisse horizontalement pour poser des pics.', coin: 'Clique ou glisse pour poser des pièces.', star: 'Clique pour poser une étoile (invincibilité).',
+    speed: 'Clique pour poser un éclair (vitesse).', enemy: 'Clique sur une surface pour poser un ennemi — étire sa zone de patrouille avec les poignées.',
+    boss: 'Clique pour poser un boss : il bloque l\'arrivée tant qu\'il est en vie.', start: 'Clique pour placer le départ.', goal: 'Clique pour placer l\'arrivée.',
+    erase: 'Clique un objet pour l\'effacer, ou glisse sur le sol pour y creuser un trou.'
+  }[ED.tool];
+  if(!ED.hideUI){
+    ctx.save(); ctx.fillStyle = 'rgba(8,6,16,0.7)'; ctx.fillRect(0, HEIGHT - 26, WIDTH, 26);
+    ctx.fillStyle = '#fff'; ctx.font = '13px Arial'; ctx.textAlign = 'left'; ctx.fillText(hint, 10, HEIGHT - 8);
+    ctx.textAlign = 'right'; ctx.fillStyle = '#9fb0d8'; ctx.fillText(`x ${Math.round(cam)} / ${d.w}   ·   ${mkCount(d)} objets`, WIDTH - 10, HEIGHT - 8);
+    ctx.restore();
+  }
+}
+
+// ===================== INTERFACE DU CRÉATEUR (DOM) + SAUVEGARDES + COMMUNAUTÉ =====================
+const MK_LS = 'zkr_levels_v1', MK_UID = 'zkr_uid_v1', MK_LIKES = 'zkr_likes_v1';
+function mkUid(){
+  try { let u = localStorage.getItem(MK_UID); if(!u){ u = 'u_' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36); localStorage.setItem(MK_UID, u); } return u; }
+  catch(e){ if(!mkUid.mem) mkUid.mem = 'u_' + Math.random().toString(36).slice(2, 12); return mkUid.mem; }
+}
+function mkLoadLocal(){ try { const a = JSON.parse(localStorage.getItem(MK_LS) || '[]'); return Array.isArray(a) ? a : []; } catch(e){ return []; } }
+function mkSaveLocal(list){ try { localStorage.setItem(MK_LS, JSON.stringify(list)); return true; } catch(e){ return false; } }
+function mkLiked(){ try { return JSON.parse(localStorage.getItem(MK_LIKES) || '{}') || {}; } catch(e){ return {}; } }
+function mkNewId(){ return 'l_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+function h$(tag, props, ...kids){
+  const el = document.createElement(tag);
+  if(props) for(const k in props){
+    const v = props[k];
+    if(k === 'style') el.style.cssText = v;
+    else if(k === 'class') el.className = v;
+    else if(k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if(k === 'value') el.value = v;
+    else if(k === 'checked') el.checked = !!v;
+    else if(v !== false && v != null) el.setAttribute(k, v);
+  }
+  kids.flat(2).forEach(c => { if(c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(String(c))); });
+  return el;
+}
+
+// ---------- Style ----------
+document.head.appendChild(h$('style', null, `
+#mkRoot{text-align:left;position:absolute;z-index:40;pointer-events:none;font-family:Arial,Helvetica,sans-serif;color:#fff;overflow:hidden}
+#mkRoot *{box-sizing:border-box}
+#mkRoot .mkp{pointer-events:auto}
+.mkBar{position:absolute;left:0;right:0;top:0;display:flex;gap:6px;align-items:center;padding:6px 8px;background:rgba(14,10,26,.92);border-bottom:2px solid #5b93f0;flex-wrap:wrap}
+.mkBtn{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:8px;padding:5px 9px;font:bold 12px Arial;cursor:pointer;white-space:nowrap}
+.mkBtn:hover{background:rgba(255,255,255,.22)}.mkBtn:active{transform:scale(.96)}
+.mkBtn.pri{background:linear-gradient(#2f6fe0,#1c4aa8);border-color:#5b93f0}
+.mkBtn.ok{background:linear-gradient(#2e9e55,#1c6e38);border-color:#6be39a}
+.mkBtn.bad{background:rgba(220,60,60,.3);border-color:rgba(255,120,120,.6)}
+.mkBtn[disabled]{opacity:.4;cursor:not-allowed}
+.mkIn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:7px;padding:5px 7px;font:13px Arial;min-width:0}
+select.mkIn option{background:#1b1430;color:#fff}
+.mkTools{position:absolute;left:6px;top:58px;display:flex;flex-direction:column;gap:6px}
+.mkGrid{display:grid;grid-template-columns:repeat(2,38px);gap:4px;background:rgba(14,10,26,.85);padding:5px;border-radius:10px;border:1px solid rgba(255,255,255,.2)}
+.mkT{width:38px;height:34px;font-size:18px;border-radius:7px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.08);color:#fff;cursor:pointer;padding:0}
+.mkT.on{background:#2f6fe0;border-color:#9ec1ff}
+.mkProps{position:absolute;right:6px;top:58px;width:210px;background:rgba(14,10,26,.92);border:1px solid #5b93f0;border-radius:10px;padding:9px;font-size:12px;display:flex;flex-direction:column;gap:7px}
+.mkProps label{display:flex;flex-direction:column;gap:3px;color:#c9d4ff}
+.mkProps h4{margin:0;font-size:13px;color:#ffe14a}
+.mkScroll{position:absolute;left:60px;right:230px;bottom:32px}
+.mkScroll input{width:100%}
+.mkChip{font:bold 11px Arial;padding:3px 8px;border-radius:99px;background:rgba(255,160,40,.25);border:1px solid #ffb43c;color:#ffd48a}
+.mkChip.ok{background:rgba(60,200,110,.25);border-color:#5be39a;color:#b9ffd6}
+.mkToast{position:absolute;left:50%;top:60px;transform:translateX(-50%);background:rgba(10,12,24,.95);border:1px solid #6cf;border-radius:10px;padding:8px 16px;font:bold 13px Arial;opacity:0;transition:opacity .3s;pointer-events:none;max-width:90%;text-align:center}
+.mkModal{position:absolute;inset:0;background:rgba(5,4,12,.78);display:flex;align-items:center;justify-content:center;padding:10px}
+.mkBox{background:#1a1330;border:2px solid #5b93f0;border-radius:14px;padding:16px;width:min(720px,100%);max-height:100%;overflow:auto;display:flex;flex-direction:column;gap:10px}
+.mkBox h2{margin:0;font-size:18px;text-align:center;letter-spacing:1px}
+.mkBox h3{margin:4px 0 0;font-size:13px;color:#9fb0d8}
+.mkRow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mkItem{display:flex;gap:10px;align-items:center;justify-content:space-between;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:8px 10px;flex-wrap:wrap}
+.mkItem .nm{font-weight:bold;font-size:14px}.mkItem .sub{font-size:11px;color:#9fb0d8}
+.mkMenuBtn{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);font-size:14px;padding:9px 18px;display:none}
+.mkEye{position:absolute;right:6px;top:6px;display:none}
+.mkBig{display:block;width:100%;padding:13px;font-size:15px}
+`));
+
+// ---------- Racine ----------
+const mkRoot = h$('div', { id: 'mkRoot' });
+document.getElementById('wrap').appendChild(mkRoot);
+const mkBar = h$('div', { class: 'mkBar mkp', style: 'display:none' });
+const mkTools = h$('div', { class: 'mkTools mkp', style: 'display:none' });
+const mkProps = h$('div', { class: 'mkProps mkp', style: 'display:none' });
+const mkScroll = h$('div', { class: 'mkScroll mkp', style: 'display:none' });
+const mkToastEl = h$('div', { class: 'mkToast' });
+const mkModalEl = h$('div', { class: 'mkModal mkp', style: 'display:none' });
+const mkMenuBtn = h$('button', { class: 'mkBtn pri mkMenuBtn mkp', onclick: () => mkOpenModal('hub') }, '🛠 CRÉATEUR DE NIVEAUX (N)');
+const mkEye = h$('button', { class: 'mkBtn mkEye mkp', title: 'Afficher / masquer l\'interface (Tab)', onclick: () => { ED.hideUI = !ED.hideUI; mkShowEditorUI(); } }, '👁');
+mkRoot.append(mkBar, mkTools, mkProps, mkScroll, mkToastEl, mkEye, mkMenuBtn, mkModalEl);
+
+function mkPlace(){
+  const bh = mkBar.style.display !== 'none' ? mkBar.offsetHeight : 0;
+  mkTools.style.top = (bh + 8) + 'px'; mkProps.style.top = (bh + 46) + 'px';
+  mkEye.style.top = (ED.hideUI ? 6 : bh + 8) + 'px';
+}
+function mkLayout(){
+  const r = canvas;
+  mkRoot.style.left = r.offsetLeft + r.clientLeft + 'px'; mkRoot.style.top = r.offsetTop + r.clientTop + 'px';
+  mkRoot.style.width = r.clientWidth + 'px'; mkRoot.style.height = r.clientHeight + 'px'; mkPlace();
+}
+let mkToastT = null;
+function mkToast(msg){ mkToastEl.textContent = msg; mkToastEl.style.opacity = '1'; clearTimeout(mkToastT); mkToastT = setTimeout(() => { mkToastEl.style.opacity = '0'; }, 3200); }
+function mkModalOpen(){ return mkModalEl.style.display !== 'none'; }
+function mkCloseModal(){ mkModalEl.style.display = 'none'; mkModalEl.textContent = ''; }
+function mkHideAllUI(){ mkBar.style.display = mkTools.style.display = mkProps.style.display = mkScroll.style.display = 'none'; mkEye.style.display = 'none'; mkCloseModal(); }
+function mkShowEditorUI(){
+  const on = !ED.hideUI;
+  mkBar.style.display = on ? 'flex' : 'none'; mkTools.style.display = on ? 'flex' : 'none'; mkScroll.style.display = on ? 'block' : 'none';
+  mkEye.style.display = 'block'; mkPlace();
+  mkRefreshProps();
+}
+
+// ---------- Barre du haut ----------
+let mkNameIn, mkThemeSel, mkChip, mkUndoBtn, mkRedoBtn, mkPubBtn;
+function mkBuildBar(){
+  mkNameIn = h$('input', { class: 'mkIn', maxlength: MK.NAME_MAX, style: 'width:120px', placeholder: 'Nom du niveau', oninput: e => { ED.data.name = mkClean(e.target.value, MK.NAME_MAX); ED.dirty = true; } });
+  mkThemeSel = h$('select', { class: 'mkIn', title: 'Biome (décor, couleurs, musique)', onchange: e => { ED.data.theme = +e.target.value; ED.dirty = true; ED.clearedSig = null; mkRefreshBar(); } },
+    WORLD_THEMES.map((t, i) => h$('option', { value: i }, t.name)));
+  mkUndoBtn = h$('button', { class: 'mkBtn', title: 'Annuler (Ctrl+Z)', onclick: edUndo }, '↶');
+  mkRedoBtn = h$('button', { class: 'mkBtn', title: 'Rétablir (Ctrl+Y)', onclick: edRedo }, '↷');
+  mkChip = h$('span', { class: 'mkChip' }, '');
+  mkPubBtn = h$('button', { class: 'mkBtn ok', onclick: () => mkOpenModal('publish') }, '🌐 Publier');
+  mkBar.append(
+    h$('button', { class: 'mkBtn bad', title: 'Quitter l\'éditeur', onclick: edQuit }, '✖'), mkNameIn, mkThemeSel, mkUndoBtn, mkRedoBtn,
+    h$('button', { class: 'mkBtn pri', onclick: edTest }, '▶ Tester'), h$('button', { class: 'mkBtn', title: 'Enregistrer (Ctrl+S)', onclick: edSave }, '💾 Sauver'),
+    h$('button', { class: 'mkBtn', title: 'Mes niveaux', onclick: () => mkOpenModal('mine') }, '📂'), mkPubBtn,
+    h$('button', { class: 'mkBtn', title: 'Longueur du niveau et fond personnalisé', onclick: () => mkOpenModal('options') }, '⚙ Fond'), mkChip
+  );
+}
+function edValidated(){ return ED.data && ED.clearedSig && ED.clearedSig === mkSig(ED.data); }
+function mkRefreshBar(){
+  if(!ED.data || !mkNameIn) return;
+  if(document.activeElement !== mkNameIn) mkNameIn.value = ED.data.name;
+  mkThemeSel.value = ED.data.theme;
+  mkUndoBtn.disabled = !ED.undo.length; mkRedoBtn.disabled = !ED.redo.length;
+  const ok = edValidated();
+  mkChip.textContent = ok ? '✅ Validé' : '⚠ À valider (▶)';
+  mkChip.title = ok ? 'Niveau terminé : tu peux le publier' : 'Teste ton niveau et atteins l\'arrivée pour pouvoir le publier';
+  mkPlace();
+  mkChip.className = 'mkChip' + (ok ? ' ok' : '');
+}
+// ---------- Outils ----------
+let mkToolBtns = {}, mkKindBox;
+function mkBuildTools(){
+  const grid = h$('div', { class: 'mkGrid' });
+  MK_TOOLS.forEach(([id, ico, tip, key]) => {
+    const b = h$('button', { class: 'mkT', title: `${tip} (${key})`, onclick: () => edSetTool(id) }, ico);
+    mkToolBtns[id] = b; grid.append(b);
+  });
+  mkKindBox = h$('div', { class: 'mkGrid', style: 'display:none;grid-template-columns:1fr;width:176px;padding:7px' });
+  mkTools.append(grid, mkKindBox);
+}
+function mkRefreshTools(){
+  Object.keys(mkToolBtns).forEach(id => mkToolBtns[id].classList.toggle('on', ED.tool === id));
+  mkKindBox.textContent = '';
+  if(ED.tool === 'enemy' || ED.tool === 'boss'){
+    const boss = ED.tool === 'boss';
+    const sel = h$('select', { class: 'mkIn', onchange: e => { if(boss) ED.bossKind = +e.target.value; else ED.kind = +e.target.value; } },
+      WORLD_THEMES.map((t, i) => h$('option', { value: i }, boss ? BOSS_NAMES[i] : t.name)));
+    sel.value = boss ? ED.bossKind : ED.kind;
+    mkKindBox.append(h$('div', { style: 'font-size:11px;color:#c9d4ff;margin-bottom:3px' }, boss ? 'Boss :' : 'Ennemi du biome :'), sel);
+    mkKindBox.style.display = 'grid';
+  } else mkKindBox.style.display = 'none';
+}
+// ---------- Propriétés de la sélection ----------
+function mkField(label, input){ return h$('label', null, label, input); }
+function mkRefreshProps(){
+  mkProps.textContent = '';
+  if(state !== STATE_EDITOR || ED.hideUI || !ED.sel || !edGet(ED.sel)){ mkProps.style.display = 'none'; return; }
+  const o = edGet(ED.sel), t = ED.sel.t, d = ED.data;
+  const mark = () => { ED.dirty = true; mkRefreshBar(); };
+  const changed = fn => e => { if(!ED.__pushedProp){ edPushUndo(); ED.__pushedProp = true; } clearTimeout(ED.__pt); ED.__pt = setTimeout(() => { ED.__pushedProp = false; }, 600); fn(e); mark(); };
+  const names = { enemy: o.b ? 'Boss' : 'Ennemi', coin: 'Pièce / bonus', spike: 'Pics', mov: 'Plateforme mobile', plat: 'Plateforme', block: 'Bloc solide', start: 'Départ', goal: 'Arrivée' };
+  mkProps.append(h$('h4', null, names[t] || 'Objet'));
+  if(t === 'enemy'){
+    const ks = h$('select', { class: 'mkIn', onchange: changed(e => { o.k = +e.target.value; }) }, WORLD_THEMES.map((th, i) => h$('option', { value: i }, o.b ? BOSS_NAMES[i] : th.name)));
+    ks.value = o.k;
+    mkProps.append(mkField('Apparence', ks),
+      mkField('Vitesse : ' + o.s, h$('input', { type: 'range', min: 0.5, max: 4, step: 0.1, value: o.s, oninput: changed(e => { o.s = +(+e.target.value).toFixed(1); e.target.parentNode.firstChild.textContent = 'Vitesse : ' + o.s; }) })));
+    if(o.b) mkProps.append(mkField('Points de vie : ' + o.hp, h$('input', { type: 'range', min: 1, max: 30, step: 1, value: o.hp, oninput: changed(e => { o.hp = +e.target.value; e.target.parentNode.firstChild.textContent = 'Points de vie : ' + o.hp; }) })));
+    mkProps.append(h$('div', { style: 'color:#9fb0d8' }, 'Tire les ● jaunes pour régler sa zone de patrouille.'));
+  } else if(t === 'mov'){
+    const ax = h$('select', { class: 'mkIn', onchange: changed(e => { o[4] = e.target.value; }) }, h$('option', { value: 'x' }, '↔ Horizontale'), h$('option', { value: 'y' }, '↕ Verticale'));
+    ax.value = o[4];
+    mkProps.append(mkField('Direction', ax),
+      mkField('Amplitude : ' + o[5], h$('input', { type: 'range', min: 20, max: 400, step: 10, value: o[5], oninput: changed(e => { o[5] = +e.target.value; e.target.parentNode.firstChild.textContent = 'Amplitude : ' + o[5]; }) })),
+      mkField('Vitesse : ' + o[6], h$('input', { type: 'range', min: 0.01, max: 0.08, step: 0.005, value: o[6], oninput: changed(e => { o[6] = +(+e.target.value).toFixed(3); e.target.parentNode.firstChild.textContent = 'Vitesse : ' + o[6]; }) })),
+      mkField('Décalage de départ', h$('input', { type: 'range', min: 0, max: 6.3, step: 0.1, value: o[7], oninput: changed(e => { o[7] = +e.target.value; }) })));
+  } else if(t === 'coin'){
+    const ks = h$('select', { class: 'mkIn', onchange: changed(e => { o[2] = +e.target.value; }) }, h$('option', { value: 0 }, '🪙 Pièce'), h$('option', { value: 1 }, '⭐ Étoile (invincible)'), h$('option', { value: 2 }, '⚡ Éclair (vitesse)'));
+    ks.value = o[2]; mkProps.append(mkField('Type', ks));
+  } else if(t === 'start' || t === 'goal'){
+    mkProps.append(h$('div', { style: 'color:#9fb0d8' }, 'Déplace-le avec la souris. Pour la position exacte, utilise les outils 🚩 / 🏁.'));
+  } else {
+    mkProps.append(h$('div', { style: 'color:#9fb0d8' }, 'Tire la poignée jaune pour redimensionner.'));
+  }
+  if(t !== 'start' && t !== 'goal'){
+    mkProps.append(h$('div', { class: 'mkRow' },
+      h$('button', { class: 'mkBtn', onclick: () => {
+        edPushUndo(); const map = { enemy: 'enemies', coin: 'coins', spike: 'spikes', mov: 'mov', plat: 'plat', block: 'blocks' }, arr = d[map[t]];
+        const c = JSON.parse(JSON.stringify(o)); if(t === 'enemy'){ c.x += 40; c.l += 40; c.r += 40; } else { c[0] += 40; }
+        arr.push(c); ED.sel = { t, i: arr.length - 1 }; mkRefreshProps(); mkRefreshBar();
+      } }, '⧉ Dupliquer'),
+      h$('button', { class: 'mkBtn bad', onclick: () => { edPushUndo(); edDelete(ED.sel); ED.sel = null; mkRefreshProps(); mkRefreshBar(); } }, '🗑 Supprimer')));
+  }
+  mkProps.style.display = 'flex';
+}
+function mkBuildScroll(){
+  const r = h$('input', { type: 'range', min: 0, max: 100, value: 0, title: 'Faire défiler le niveau', oninput: e => { ED.cam = +e.target.value; edClampCam(); } });
+  mkScroll.append(r); mkScroll.r = r;
+}
+function mkSyncScroll(){
+  const r = mkScroll.r; if(!r || !ED.data) return;
+  const mx = Math.max(0, ED.data.w - WIDTH);
+  if(+r.max !== mx) r.max = mx;
+  if(document.activeElement !== r) r.value = ED.cam;
+}
+mkBuildBar(); mkBuildTools(); mkBuildScroll();
+
+// ---------- Sauvegarde locale ----------
+function edSave(){
+  if(!ED.data) return false;
+  ED.data.author = playerName;
+  const list = mkLoadLocal();
+  const id = ED.localId || mkNewId();
+  const entry = { id, updated: Date.now(), pubId: ED.pubId || null, clearedSig: ED.clearedSig || null, data: mkClone(ED.data) };
+  const i = list.findIndex(e => e.id === id);
+  if(i >= 0) list[i] = entry; else list.unshift(entry);
+  if(!mkSaveLocal(list)){ mkToast('⚠ Stockage plein : retire l\'image de fond ou supprime d\'anciens niveaux.'); return false; }
+  ED.localId = id; ED.dirty = false; mkToast('💾 Niveau enregistré'); return true;
+}
+function mkMarkCleared(localId){
+  const list = mkLoadLocal(), e = list.find(x => x.id === localId);
+  if(e){ e.clearedSig = mkSig(mkSanitize(e.data)); mkSaveLocal(list); }
+}
+function mkDownload(d){
+  const blob = new Blob([JSON.stringify(d)], { type: 'application/json' });
+  const a = h$('a', { href: URL.createObjectURL(blob), download: (d.name || 'niveau').replace(/[^\w\-]+/g, '_') + '.zkrlevel.json' });
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+// ---------- Modales ----------
+function mkModal(title, ...content){
+  mkModalEl.textContent = '';
+  const box = h$('div', { class: 'mkBox' }, h$('h2', null, title), content, h$('button', { class: 'mkBtn', onclick: mkCloseModal }, 'Fermer'));
+  mkModalEl.append(box); mkModalEl.style.display = 'flex'; mkLayout();
+  return box;
+}
+window.addEventListener('keydown', e => { if(e.key === 'Escape' && mkModalOpen()){ mkCloseModal(); e.preventDefault(); } });
+
+function mkOpenModal(kind){
+  if(onlineMode){ mkToast('Quitte la partie en ligne pour utiliser le créateur.'); return; }
+  if(kind === 'hub') return mkHub();
+  if(kind === 'mine') return mkMine();
+  if(kind === 'community') return mkCommunity();
+  if(kind === 'options') return mkOptions();
+  if(kind === 'publish') return mkPublish();
+}
+function mkHub(){
+  mkModal('🛠 CRÉATEUR DE NIVEAUX',
+    h$('div', { style: 'text-align:center;color:#c9d4ff;font-size:13px' }, 'Crée ton niveau, teste-le, puis publie-le pour que les autres joueurs puissent y jouer.'),
+    h$('button', { class: 'mkBtn pri mkBig', onclick: () => { mkCloseModal(); edOpen(null); } }, '➕ Créer un nouveau niveau'),
+    h$('button', { class: 'mkBtn mkBig', onclick: () => mkMine() }, '📂 Mes niveaux'),
+    h$('button', { class: 'mkBtn ok mkBig', onclick: () => mkCommunity() }, '🌐 Niveaux de la communauté'));
+}
+function mkImportFile(done){
+  const inp = h$('input', { type: 'file', accept: '.json,application/json', style: 'display:none', onchange: e => {
+    const f = e.target.files[0]; if(!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      const d = mkSanitize(String(rd.result));
+      if(!d){ mkToast('Fichier de niveau invalide.'); return; }
+      const list = mkLoadLocal(); list.unshift({ id: mkNewId(), updated: Date.now(), pubId: null, clearedSig: null, data: d });
+      if(!mkSaveLocal(list)) mkToast('Stockage plein.'); else { mkToast('Niveau importé : ' + d.name); done && done(); }
+    };
+    rd.readAsText(f);
+  } });
+  document.body.appendChild(inp); inp.click(); setTimeout(() => inp.remove(), 60000);
+}
+function mkMine(){
+  const list = mkLoadLocal().sort((a, b) => b.updated - a.updated);
+  const box = mkModal('📂 MES NIVEAUX',
+    h$('div', { class: 'mkRow' },
+      h$('button', { class: 'mkBtn pri', onclick: () => { mkCloseModal(); edOpen(null); } }, '➕ Nouveau'),
+      h$('button', { class: 'mkBtn', onclick: () => mkImportFile(() => mkMine()) }, '📥 Importer un fichier')),
+    list.length ? list.map(en => {
+      const d = mkSanitize(en.data); if(!d) return null;
+      const valid = en.clearedSig && en.clearedSig === mkSig(d);
+      return h$('div', { class: 'mkItem' },
+        h$('div', null, h$('div', { class: 'nm' }, d.name), h$('div', { class: 'sub' }, `${WORLD_THEMES[d.theme].name} · ${mkCount(d)} objets · ${valid ? '✅ validé' : '⚠ non validé'}${en.pubId ? ' · 🌐 publié' : ''}`)),
+        h$('div', { class: 'mkRow' },
+          h$('button', { class: 'mkBtn', onclick: () => { mkCloseModal(); edOpen(en); } }, '✏ Modifier'),
+          h$('button', { class: 'mkBtn pri', onclick: () => { mkCloseModal(); startCustomLevel(d, 'mine', en.pubId, en.id); } }, '▶ Jouer'),
+          h$('button', { class: 'mkBtn ok', disabled: !valid, title: valid ? '' : 'Joue et termine le niveau pour le valider', onclick: () => mkPublish(en) }, '🌐 Publier'),
+          h$('button', { class: 'mkBtn', onclick: () => mkDownload(d) }, '⬇'),
+          h$('button', { class: 'mkBtn bad', onclick: () => { if(!confirm('Supprimer « ' + d.name + ' » ?')) return; mkSaveLocal(mkLoadLocal().filter(x => x.id !== en.id)); mkMine(); } }, '🗑')));
+    }) : h$('div', { style: 'text-align:center;color:#9fb0d8;padding:18px' }, 'Aucun niveau pour le moment. Clique sur « Nouveau » !'));
+}
+function mkOptions(){
+  const d = ED.data; if(!d) return;
+  const mark = () => { ED.dirty = true; mkRefreshBar(); };
+  const wIn = h$('input', { class: 'mkIn', type: 'number', min: MK.MIN_W, max: MK.MAX_W, step: 100, value: d.w, style: 'width:110px', onchange: e => {
+    edPushUndo(); d.w = Math.round(mkClamp(e.target.value, MK.MIN_W, MK.MAX_W, d.w) / 20) * 20; e.target.value = d.w; edClampCam(); ED.clearedSig = null; mark();
+  } });
+  const bgInfo = h$('div', { class: 'sub', style: 'font-size:11px;color:#9fb0d8' }, d.bg ? `Image importée (${Math.round(d.bg.length / 1024)} Ko)` : 'Aucune image : le fond du biome est utilisé.');
+  const file = h$('input', { type: 'file', accept: 'image/*', style: 'display:none', onchange: async e => {
+    const f = e.target.files[0]; if(!f) return;
+    try { const url = await mkImportImage(f); edPushUndo(); d.bg = url; d.deco = false; mark(); mkOptions(); mkToast('Fond importé !'); }
+    catch(err){ mkToast('⚠ ' + (err && err.message || 'Import impossible')); }
+  } });
+  mkModal('⚙ NIVEAU & FOND PERSONNALISÉ',
+    h$('div', { class: 'mkRow' }, h$('label', null, 'Longueur du niveau (px) : '), wIn, h$('span', { class: 'sub', style: 'color:#9fb0d8;font-size:11px' }, `${MK.MIN_W} à ${MK.MAX_W}`)),
+    h$('h3', null, 'Arrière-plan'),
+    bgInfo,
+    h$('div', { class: 'mkRow' },
+      h$('button', { class: 'mkBtn pri', onclick: () => file.click() }, '🖼 Importer une image'), file,
+      h$('button', { class: 'mkBtn bad', disabled: !d.bg, onclick: () => { edPushUndo(); d.bg = null; d.deco = true; mark(); mkOptions(); } }, 'Retirer l\'image')),
+    h$('div', { class: 'mkRow' }, h$('label', null, 'Affichage : '),
+      (() => { const s = h$('select', { class: 'mkIn', onchange: e => { d.bgMode = e.target.value; mark(); } }, h$('option', { value: 'fit' }, 'Étirée sur tout le niveau (parallaxe)'), h$('option', { value: 'tile' }, 'Répétée (motif / ciel)')); s.value = d.bgMode; return s; })()),
+    h$('div', { class: 'mkRow' }, h$('label', null, 'Assombrir : '), h$('input', { type: 'range', min: 0, max: 0.8, step: 0.05, value: d.bgDim, oninput: e => { d.bgDim = +e.target.value; mark(); } })),
+    h$('div', { class: 'mkRow' }, h$('label', null, h$('input', { type: 'checkbox', checked: d.deco, onchange: e => { d.deco = e.target.checked; mark(); } }), ' Garder le décor animé du biome (nuages, bâtiments…)')),
+    h$('div', { class: 'sub', style: 'font-size:11px;color:#9fb0d8' }, 'Conseil : une image large (16:9), JPEG/PNG/WebP. Elle est automatiquement redimensionnée et compressée. N\'importe que des images dont tu as les droits.'));
+}
+
+// ---------- Publication ----------
+function mkPublish(entry){
+  let data, sig, pubId, localId = null;
+  if(entry){ data = mkSanitize(entry.data); sig = entry.clearedSig; pubId = entry.pubId; localId = entry.id; }
+  else { if(!ED.data) return; ED.data.author = playerName; data = ED.data; sig = ED.clearedSig; pubId = ED.pubId; localId = ED.localId; }
+  const valid = sig && sig === mkSig(data);
+  if(!valid){ mkModal('🌐 PUBLIER', h$('div', { style: 'text-align:center;line-height:1.6' }, 'Pour publier, tu dois d\'abord ', h$('b', null, 'terminer ton propre niveau'), ' (comme dans Mario Maker) : ça prouve qu\'il est faisable.', h$('br'), 'Clique sur ▶ Tester puis atteins l\'arrivée 🏁.')); return; }
+  if(!fbDB){ mkModal('🌐 PUBLIER', h$('div', { style: 'text-align:center' }, 'Connexion en ligne indisponible. Vérifie ta connexion (ou exporte ton niveau en fichier).')); return; }
+  const nameIn = h$('input', { class: 'mkIn', maxlength: MK.NAME_MAX, value: data.name, style: 'width:100%' });
+  const status = h$('div', { style: 'text-align:center;min-height:18px;font-size:13px' }, '');
+  const btn = h$('button', { class: 'mkBtn ok mkBig', onclick: async () => {
+    data.name = mkClean(nameIn.value, MK.NAME_MAX) || 'Sans titre'; data.author = playerName;
+    const json = JSON.stringify(data);
+    if(json.length > 700000){ status.textContent = '⚠ Niveau trop lourd (réduis l\'image de fond).'; return; }
+    btn.disabled = true; status.textContent = 'Publication…';
+    try {
+      const id = pubId || fbDB.ref('levels').push().key, up = {};
+      const base = { name: data.name, author: data.author, uid: mkUid(), theme: data.theme, w: data.w, n: mkCount(data), bg: data.bg ? 1 : 0, t: firebase.database.ServerValue.TIMESTAMP };
+      if(pubId) Object.keys(base).forEach(k => { up['levels/' + id + '/' + k] = base[k]; });
+      else up['levels/' + id] = { ...base, likes: 0, plays: 0 };
+      up['levelData/' + id] = json;
+      await fbDB.ref().update(up);
+      const list = mkLoadLocal(), le = list.find(x => x.id === localId);
+      if(le){ le.pubId = id; le.data = mkClone(data); le.updated = Date.now(); mkSaveLocal(list); }
+      if(!entry){ ED.pubId = id; ED.data.name = data.name; ED.dirty = false; mkRefreshBar(); }
+      mkToast('🎉 Niveau publié dans la communauté !'); mkCloseModal();
+    } catch(err){ btn.disabled = false; status.textContent = '⚠ Échec de la publication (droits Firebase ou connexion).'; console.warn(err); }
+  } }, pubId ? '🌐 Mettre à jour la publication' : '🌐 Publier maintenant');
+  mkModal('🌐 PUBLIER MON NIVEAU',
+    h$('div', { style: 'text-align:center;color:#c9d4ff;font-size:13px' }, `${WORLD_THEMES[data.theme].name} · ${mkCount(data)} objets · ✅ validé`),
+    h$('label', null, 'Nom du niveau', nameIn),
+    h$('div', { class: 'sub', style: 'font-size:11px;color:#9fb0d8;text-align:center' }, `Auteur affiché : ${playerName}. Ton niveau sera visible par tous les joueurs.`),
+    btn, status);
+}
+
+// ---------- Communauté ----------
+let mkCommCache = [], mkCommSort = 'recent', mkCommQuery = '';
+function mkCommunity(){
+  const list = h$('div', { style: 'display:flex;flex-direction:column;gap:8px' });
+  const info = h$('div', { style: 'text-align:center;color:#9fb0d8;font-size:12px' }, 'Chargement…');
+  const q = h$('input', { class: 'mkIn', placeholder: '🔎 Rechercher…', value: mkCommQuery, style: 'flex:1', oninput: e => { mkCommQuery = e.target.value; draw(); } });
+  const sort = h$('select', { class: 'mkIn', onchange: e => { mkCommSort = e.target.value; draw(); } }, h$('option', { value: 'recent' }, 'Récents'), h$('option', { value: 'likes' }, 'Les plus aimés'), h$('option', { value: 'plays' }, 'Les plus joués'));
+  sort.value = mkCommSort;
+  function draw(){
+    list.textContent = '';
+    const qq = mkCommQuery.trim().toLowerCase();
+    let arr = mkCommCache.filter(l => !qq || (l.name + ' ' + l.author).toLowerCase().includes(qq));
+    arr.sort((a, b) => mkCommSort === 'likes' ? (b.likes - a.likes) : mkCommSort === 'plays' ? (b.plays - a.plays) : (b.t - a.t));
+    if(!arr.length){ list.append(h$('div', { style: 'text-align:center;color:#9fb0d8;padding:14px' }, mkCommCache.length ? 'Aucun résultat.' : 'Aucun niveau publié pour le moment : sois le premier !')); return; }
+    const liked = mkLiked(), mine = mkUid();
+    arr.forEach(l => {
+      const likeBtn = h$('button', { class: 'mkBtn', onclick: () => {
+        const lk = mkLiked(); if(lk[l.id]){ mkToast('Tu as déjà aimé ce niveau.'); return; }
+        lk[l.id] = 1; try { localStorage.setItem(MK_LIKES, JSON.stringify(lk)); } catch(e){}
+        l.likes++; try { fbDB.ref('levels/' + l.id + '/likes').transaction(n => (n || 0) + 1); } catch(e){}
+        draw();
+      } }, (liked[l.id] ? '❤️ ' : '🤍 ') + l.likes);
+      list.append(h$('div', { class: 'mkItem' },
+        h$('div', null, h$('div', { class: 'nm' }, l.name), h$('div', { class: 'sub' }, `par ${l.author || '?'} · ${l.themeName} · ${l.n} objets${l.bg ? ' · 🖼' : ''} · ▶ ${l.plays}`)),
+        h$('div', { class: 'mkRow' },
+          h$('button', { class: 'mkBtn pri', onclick: () => mkPlayCommunity(l) }, '▶ Jouer'), likeBtn,
+          h$('button', { class: 'mkBtn', title: 'Copier dans mes niveaux pour le modifier', onclick: () => mkCopyCommunity(l) }, '📥 Copier'),
+          l.uid === mine ? h$('button', { class: 'mkBtn bad', onclick: async () => {
+            if(!confirm('Retirer « ' + l.name + ' » de la communauté ?')) return;
+            try { await fbDB.ref().update({ ['levels/' + l.id]: null, ['levelData/' + l.id]: null }); mkCommCache = mkCommCache.filter(x => x.id !== l.id); draw(); mkToast('Niveau retiré.'); }
+            catch(e){ mkToast('Échec de la suppression.'); }
+          } }, '🗑') : null)));
+    });
+  }
+  mkModal('🌐 NIVEAUX DE LA COMMUNAUTÉ', h$('div', { class: 'mkRow' }, q, sort, h$('button', { class: 'mkBtn', onclick: () => mkCommunity() }, '↻')), info, list);
+  if(!fbDB){ info.textContent = 'Connexion en ligne indisponible.'; return; }
+  fbDB.ref('levels').limitToLast(150).once('value').then(snap => {
+    const v = snap.val() || {};
+    mkCommCache = Object.keys(v).map(id => {
+      const m = v[id] || {};
+      return { id, name: mkClean(m.name, MK.NAME_MAX) || 'Sans titre', author: mkClean(m.author, 14), uid: String(m.uid || ''), theme: Math.round(mkClamp(m.theme, 0, WORLD_THEMES.length - 1, 0)),
+        themeName: WORLD_THEMES[Math.round(mkClamp(m.theme, 0, WORLD_THEMES.length - 1, 0))].name, n: Math.round(mkClamp(m.n, 0, 9999, 0)), bg: m.bg ? 1 : 0,
+        likes: Math.round(mkClamp(m.likes, 0, 1e9, 0)), plays: Math.round(mkClamp(m.plays, 0, 1e9, 0)), t: Number(m.t) || 0 };
+    });
+    info.textContent = `${mkCommCache.length} niveau(x)`; draw();
+  }).catch(() => { info.textContent = 'Impossible de charger la liste (connexion ou droits Firebase).'; });
+}
+async function mkFetchLevel(l){
+  const snap = await fbDB.ref('levelData/' + l.id).once('value');
+  const d = mkSanitize(snap.val());
+  if(!d) throw new Error('Niveau invalide');
+  return d;
+}
+async function mkPlayCommunity(l){ try { mkToast('Chargement…'); const d = await mkFetchLevel(l); startCustomLevel(d, 'community', l.id); } catch(e){ mkToast('Impossible de charger ce niveau.'); } }
+async function mkCopyCommunity(l){
+  try {
+    const d = await mkFetchLevel(l);
+    const list = mkLoadLocal(); list.unshift({ id: mkNewId(), updated: Date.now(), pubId: null, clearedSig: null, data: d });
+    if(!mkSaveLocal(list)) mkToast('Stockage plein.'); else mkToast('📥 Copié dans « Mes niveaux »');
+  } catch(e){ mkToast('Impossible de copier ce niveau.'); }
+}
+
+// ---------- Tick (appelé à chaque pas de simulation) ----------
+let mkLastSize = '';
+function mkTick(){
+  const sz = canvas.clientWidth + 'x' + canvas.clientHeight + canvas.offsetLeft + canvas.offsetTop;
+  if(sz !== mkLastSize){ mkLastSize = sz; mkLayout(); }
+  const showBtn = state === STATE_MENU && !onlineMode && !customPlay && !mkModalOpen();
+  const want = showBtn ? 'block' : 'none';
+  if(mkMenuBtn.style.display !== want) mkMenuBtn.style.display = want;
+  if(state === STATE_EDITOR && frameTick % 20 === 0) mkRefreshBar();
+}
+
 // Boucle à PAS FIXE 60 Hz : la simulation avance toujours à la même vitesse, quelle que soit la
 // fréquence d'affichage (60/120/144 Hz). Indispensable en ligne : sinon un écran 144 Hz ferait
 // courir son personnage 2,4x plus vite que chez les autres.
@@ -4802,6 +5827,8 @@ function gameLoop(){
 function stepGame(){
   frameTick++;
   pollGamepads();
+  if(state === STATE_EDITOR) editorStep();
+  mkTick();
   if(screenShakeTimer > 0){ screenShakeTimer--; if(screenShakeTimer <= 0) screenShakeMag = 0; }
   if(damageFlashTimer > 0) damageFlashTimer--;
   if(comboTimer > 0){ comboTimer--; if(comboTimer <= 0) comboCount = 0; }
@@ -4924,6 +5951,7 @@ function stepGame(){
   const tcPersoEl = document.getElementById('tcPerso');
   if(tcPersoEl) tcPersoEl.classList.toggle('show', isMobile && (state === STATE_MENU || state === STATE_PLAYING));
 
+  customStepHook();
   updateMusic();
   updateParticles();
   updateConfetti();
@@ -4958,12 +5986,15 @@ function renderGame(){
     ] : [
       ['Appuie sur ESPACE pour lancer le jeu', false],
       ['E : tir à distance   |   M : carte du monde', false],
-      [`Appuie sur C pour choisir ton personnage (actuel : ${getCharacter(currentCharacterId).name})`, false]
+      [`Appuie sur C pour choisir ton personnage (actuel : ${getCharacter(currentCharacterId).name})`, false],
+      ['N : créateur de niveaux (crée, teste et publie les tiens)', false]
     ], 60);
   } else if(state === STATE_MAP){
     drawMapScreen();
   } else if(state === STATE_CHARACTER){
     drawCharacterScreen();
+  } else if(state === STATE_EDITOR){
+    renderEditor();
   } else if(state === STATE_VICTORY){
     let g = ctx.createLinearGradient(0,0,0,HEIGHT); g.addColorStop(0, '#1a4d2e'); g.addColorStop(1, '#2e8b57'); ctx.fillStyle = g; ctx.fillRect(0,0,WIDTH,HEIGHT);
   } else {
@@ -4972,8 +6003,11 @@ function renderGame(){
       ctx.beginPath(); ctx.rect(offsetX, 0, viewW, HEIGHT); ctx.clip();
       ctx.translate(offsetX, 0);
 
-      let g = ctx.createLinearGradient(0,0,0,HEIGHT); g.addColorStop(0, rgb(theme.bgTop)); g.addColorStop(1, rgb(theme.bgBottom)); ctx.fillStyle = g; ctx.fillRect(0,0,viewW,HEIGHT);
+      if(customPlay){ drawMakerBackground(customPlay.data, theme, camX, viewW); }
+      else {
+        let g = ctx.createLinearGradient(0,0,0,HEIGHT); g.addColorStop(0, rgb(theme.bgTop)); g.addColorStop(1, rgb(theme.bgBottom)); ctx.fillStyle = g; ctx.fillRect(0,0,viewW,HEIGHT);
       drawWorldDeco(worldIndex, camX);
+      }
 
       ctx.save(); ctx.translate(-camX, 0);
       level.groundRects.forEach(r => { ctx.fillStyle = rgb(theme.ground); ctx.fillRect(r.x, r.y, r.w, r.h); ctx.fillStyle = rgb(theme.groundTop); ctx.fillRect(r.x, r.y, r.w, 10); drawGroundTexture(worldIndex, r, camX); });
@@ -5188,7 +6222,7 @@ function renderGame(){
       const pingLabel = lastPingMs == null ? '...' : (lastPingMs < 0 ? 'erreur' : `${lastPingMs}ms`);
       const connLabel = fbConnected === false ? '⚠️ DÉCONNECTÉ' : '';
       ctx.textAlign = 'right';
-      ctx.fillText(`${theme.name} - ${LEVEL_NAMES[levelIndex]}   |   Salon ${roomCode} (${nbPlayers} joueurs)   |   Ping: ${pingLabel} ${connLabel}`, WIDTH - 20, 30);
+      ctx.fillText(`${customPlay ? customPlay.data.name : theme.name + ' - ' + LEVEL_NAMES[levelIndex]}   |   Salon ${roomCode} (${nbPlayers} joueurs)   |   Ping: ${pingLabel} ${connLabel}`, WIDTH - 20, 30);
       ctx.textAlign = 'left';
       if(amIEliminated()){
         const targetName = (spectateTargetId && onlineMeta[spectateTargetId] && onlineMeta[spectateTargetId].name) || '...';
@@ -5203,11 +6237,11 @@ function renderGame(){
       const h1w = drawHeartsHud(14, 10, lives, theme.accent, 'J1');
       const h2w = drawHeartsHud(14 + h1w + 8, 10, lives2, [90,220,140], 'J2');
       drawScoreHud(14 + h1w + 8 + h2w + 8, 10, score, theme.accent);
-      ctx.textAlign = 'right'; ctx.fillText(`${theme.name} - ${LEVEL_NAMES[levelIndex]}   |   J2 = vert`, WIDTH - 20, 30); ctx.textAlign = 'left';
+      ctx.textAlign = 'right'; ctx.fillText(`${customPlay ? customPlay.data.name : theme.name + ' - ' + LEVEL_NAMES[levelIndex]}   |   J2 = vert`, WIDTH - 20, 30); ctx.textAlign = 'left';
     } else {
       const heartsW = drawHeartsHud(14, 10, lives, theme.accent);
       drawScoreHud(14 + heartsW + 10, 10, score, theme.accent);
-      ctx.textAlign = 'right'; ctx.fillText(`${theme.name} - ${LEVEL_NAMES[levelIndex]}   |   M : carte   |   H : accueil`, WIDTH - 20, 30); ctx.textAlign = 'left';
+      ctx.textAlign = 'right'; ctx.fillText(`${customPlay ? customPlay.data.name : theme.name + ' - ' + LEVEL_NAMES[levelIndex]}   |   M : carte   |   H : accueil`, WIDTH - 20, 30); ctx.textAlign = 'left';
     }
 
     {
@@ -5243,7 +6277,11 @@ function renderGame(){
     if(state === STATE_LEVEL_CLEAR) drawLevelClearPanel();
   }
   
-  if(state === STATE_GAME_OVER) drawCenterText([
+  if(state === STATE_GAME_OVER) drawCenterText(customPlay ? [
+    ['GAME OVER', true],
+    ['ESPACE : réessayer ce niveau', false],
+    ['M : quitter', false]
+  ] : [
     ['GAME OVER', true],
     [`ESPACE : rejouer depuis ${WORLD_THEMES[checkpointWorld].name}`, false],
     ['M : carte des niveaux', false]
