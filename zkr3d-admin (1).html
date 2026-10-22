@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZKR 3D - Admin Personnages</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#140f28;color:#fff;font:13px Arial,Helvetica,sans-serif}
+#app{display:flex;height:100%}
+#side{width:390px;max-width:48vw;overflow-y:auto;background:#1b1436;border-right:2px solid #3a2d6b;padding:12px}
+#view{flex:1;position:relative;min-width:0}
+#c{position:absolute;inset:0;width:100%;height:100%;display:block}
+h1{font-size:18px;margin:0 0 4px;color:#ffe066}
+h3{font-size:13px;margin:16px 0 6px;padding-bottom:4px;border-bottom:1px solid #3a2d6b;color:#8fd0ff;letter-spacing:1px}
+label{display:block;margin:6px 0 2px;opacity:.8}
+input[type=text],input[type=number],select{width:100%;background:#0f0b22;color:#fff;border:1px solid #4a3c85;border-radius:6px;padding:6px}
+input[type=range]{width:100%}
+button{background:#3a2d6b;color:#fff;border:1px solid #6a58b8;border-radius:6px;padding:6px 10px;cursor:pointer;font:bold 12px Arial}
+button:hover{background:#4d3d8c}
+button.big{background:#1f7a45;border-color:#38c27a;padding:9px 12px;font-size:13px}
+button.big.alt{background:#2b5ea8;border-color:#5b93f0}
+.row{display:flex;gap:6px;align-items:center}.row>*{flex:1}
+.row>button{flex:none}
+.slot{background:#150f2b;border:1px solid #3a2d6b;border-radius:8px;padding:8px;margin:6px 0}
+.slot b{color:#ffe066}
+#drop{border:2px dashed #6a58b8;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#150f2b}
+#drop.on{background:#2a2060}
+#tree{max-height:230px;overflow:auto;background:#0f0b22;border:1px solid #3a2d6b;border-radius:6px;margin-top:6px}
+#tree div{padding:2px 6px;white-space:nowrap;cursor:pointer;font-size:12px}
+#tree div:hover{background:#2a2060}#tree div.sel{background:#5b3fd0}
+.tag{opacity:.55;font-size:10px;margin-left:4px}
+#msg{position:absolute;left:12px;bottom:12px;background:rgba(0,0,0,.7);padding:8px 12px;border-radius:8px;max-width:70%;display:none}
+#hint{position:absolute;right:12px;top:12px;background:rgba(0,0,0,.55);padding:8px 10px;border-radius:8px;font-size:12px;max-width:260px;line-height:1.4}
+.small{font-size:11px;opacity:.7;line-height:1.4}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="side">
+    <h1>🛠 ZKR 3D · Admin personnages</h1>
+    <div class="small">Importe un modèle 3D (.glb ou .gltf), place-le, indique ses articulations, puis enregistre-le : il apparaît dans le jeu automatiquement (même navigateur) ou via le catalogue public / fichier <b>.zkrchar</b> (écran « Personnages » → IMPORTER).</div>
+
+    <h3>1 · MODÈLE 3D</h3>
+    <div id="drop">📂 Clique ou glisse un fichier <b>.glb / .gltf</b> ici<br><span class="small">(.fbx / .obj : convertis-les d'abord en .glb, ex. Blender)</span></div>
+    <input type="file" id="fileModel" accept=".glb,.gltf" style="display:none">
+    <div class="row" style="margin-top:6px"><button id="btnLoadChar">📥 Rouvrir un .zkrchar</button></div>
+    <input type="file" id="fileChar" accept=".zkrchar,.json" style="display:none">
+    <div class="small" id="info" style="margin-top:6px">Aucun modèle chargé.</div>
+
+    <h3>2 · IDENTITÉ</h3>
+    <label>Nom du personnage</label><input type="text" id="name" value="MON PERSO" maxlength="20">
+    <label>Thème (sous-titre)</label><input type="text" id="theme" value="Perso importé" maxlength="32">
+    <div class="row">
+      <div><label>Couleur des tirs / carte</label><input type="color" id="color" value="#39b6ff" style="width:100%;height:30px"></div>
+    </div>
+    <label>Déblocage dans le jeu</label>
+    <div class="row">
+      <select id="unlock"><option value="always">Dispo dès le départ</option><option value="coins">Pièces collectées ≥</option><option value="kills">Ennemis éliminés ≥</option><option value="bosses">Boss battus ≥</option><option value="worlds">Mondes terminés ≥</option><option value="victories">Jeu terminé ≥</option></select>
+      <input type="number" id="unlockN" value="10" min="0" style="max-width:80px">
+    </div>
+    <label>Texte de quête (affiché si verrouillé)</label><input type="text" id="quest" value="" maxlength="80" placeholder="ex. Bats 3 boss.">
+
+    <h3>3 · PLACEMENT</h3>
+    <div class="small">Le perso doit regarder vers l'axe <b style="color:#5b93f0">bleu (avant)</b> et tenir dans la boîte jaune (≈ 1,95 de haut).</div>
+    <div class="row" style="margin:6px 0"><button id="btnFit">🎯 Auto-ajuster</button><button id="btnRotL">⟲ 90°</button><button id="btnRotR">⟳ 90°</button><button id="btnRot180">180°</button></div>
+    <label>Échelle</label>
+    <div class="row"><input type="number" id="scale" value="1" step="0.01" min="0.0001"><button data-sc="0.5">×0,5</button><button data-sc="0.9">×0,9</button><button data-sc="1.1">×1,1</button><button data-sc="2">×2</button></div>
+    <label>Hauteur (décalage Y) : <span id="offYv">0</span></label><input type="range" id="offY" min="-1" max="1" step="0.01" value="0">
+    <label>Rotation : <span id="rotYv">0</span>°</label><input type="range" id="rotY" min="-180" max="180" step="1" value="0">
+
+    <h3>4 · ARTICULATIONS</h3>
+    <div class="row"><button id="btnGuess">✨ Détection auto (noms d'os)</button></div>
+    <div class="small" style="margin-top:4px">Pour chaque articulation : choisis le nœud/os, l'axe de rotation et teste. Clique un nœud dans la liste (en bas) puis « ← sélection ». L'axe correct = celui qui fait balancer le membre d'avant en arrière.</div>
+    <label>Animation de test</label>
+    <select id="anim"><option value="walk">Marche</option><option value="run">Course</option><option value="jump">Saut</option><option value="manual">Manuel (curseurs)</option><option value="rest">Pose de repos</option></select>
+    <div id="slots"></div>
+
+    <h3>LISTE DES NŒUDS / OS</h3>
+    <input type="text" id="filter" placeholder="Filtrer (ex. arm, leg, head)">
+    <div id="tree"></div>
+    <div class="small" id="selInfo">Sélection : —</div>
+
+    <h3>5 · EXPORT</h3>
+    <div class="row"><button class="big" id="btnExport">💾 Exporter .zkrchar</button></div>
+    <div class="row" style="margin-top:6px"><button class="big alt" id="btnIdb">🌐 Enregistrer dans ce navigateur</button></div>
+    <div class="small" style="margin-top:4px">« Enregistrer dans ce navigateur » met le perso dans le jeu <b>en direct</b> s'il est ouvert depuis le même navigateur et le même site/dossier (aucun rechargement nécessaire). Pour que <b>tous les joueurs</b> le voient, utilise le catalogue public ci-dessous.</div>
+
+    <h3>6 · PERSONNAGES ENREGISTRÉS</h3>
+    <div id="saved"></div>
+    <div class="row" style="margin-top:6px"><button class="big alt" id="btnCatalog">📦 Exporter le catalogue public</button></div>
+    <div class="small" style="margin-top:4px">Télécharge <b>zkr3d-chars.json</b> (tous les persos enregistrés ci-dessus). Mets ce fichier <b>dans le même dossier que zkr3d.html</b> sur ton site (ex. GitHub Pages) : le jeu le charge au démarrage et chaque joueur voit les persos. Pour retirer un perso du public, supprime-le de la liste puis ré-exporte le catalogue.</div>
+
+    <h3>7 · PUBLICATION POUR TOUS LES JOUEURS</h3>
+    <div class="small">Envoie automatiquement le catalogue sur ton dépôt GitHub (celui de ton site GitHub Pages) : chaque joueur reçoit les persos au prochain chargement du jeu.</div>
+    <label>Dépôt (utilisateur/repo)</label><input type="text" id="pubRepo" placeholder="ex. monpseudo/zkr">
+    <div class="row"><div><label>Branche</label><input type="text" id="pubBranch" value="main"></div><div><label>Chemin du fichier</label><input type="text" id="pubPath" value="zkr3d-chars.json"></div></div>
+    <label>Token GitHub (stocké seulement dans ce navigateur)</label><input type="text" id="pubToken" autocomplete="off" placeholder="github_pat_…" style="-webkit-text-security:disc">
+    <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pubAuto" checked> Publier automatiquement à chaque enregistrement / suppression</label>
+    <div class="row" style="margin-top:6px"><button class="big" id="btnPublish">🚀 Publier maintenant</button></div>
+    <div class="small" style="margin-top:4px">Token : GitHub → Settings → Developer settings → Fine-grained tokens → limité à ce dépôt, permission « Contents : Read and write ». Le chemin doit être dans le même dossier que zkr3d.html (ex. <b>jeu/zkr3d-chars.json</b> si le jeu est dans /jeu).</div>
+    <div style="height:30px"></div>
+  </div>
+  <div id="view">
+    <canvas id="c"></canvas>
+    <div id="hint">Souris : tourner · molette : zoom · clic droit : déplacer</div>
+    <div id="msg"></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const SLOTS = [['head','Tête'],['armL','Bras gauche'],['armR','Bras droit'],['legL','Jambe gauche'],['legR','Jambe droite']];
+const TARGET_H = 1.95;
+
+// ---- Rig (même code que dans le jeu) ----
+const RIG_AX = { x:new THREE.Vector3(1,0,0), y:new THREE.Vector3(0,1,0), z:new THREE.Vector3(0,0,1) }, _rigQ = new THREE.Quaternion();
+function rigResolve(scene, path){ let n = scene; for(const i of path){ n = n && n.children[i]; } return n || null; }
+function rigApply(rig, vals){
+  for(const k in vals){ const r = rig[k]; if(!r) continue; _rigQ.setFromAxisAngle(RIG_AX[r.axis] || RIG_AX.x, vals[k] * r.amp * r.sign); r.node.quaternion.copy(r.rest).multiply(_rigQ); }
+}
+
+// ---- IndexedDB ----
+const IDB = {
+  open(){ return new Promise((res, rej) => { const r = indexedDB.open('zkr3d_chars', 1); r.onupgradeneeded = () => r.result.createObjectStore('chars', { keyPath:'id' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
+  async put(o){ const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction('chars', 'readwrite'); t.objectStore('chars').put(o); t.oncomplete = () => res(); t.onerror = () => rej(t.error); }); },
+  async all(){ const db = await this.open(); return new Promise((res, rej) => { const r = db.transaction('chars').objectStore('chars').getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); }); },
+  async del(id){ const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction('chars', 'readwrite'); t.objectStore('chars').delete(id); t.oncomplete = () => res(); t.onerror = () => rej(t.error); }); }
+};
+const CHAN = ('BroadcastChannel' in window) ? new BroadcastChannel('zkr3d_chars') : null;
+const notifyGame = () => { try { CHAN && CHAN.postMessage({ t:'update' }); } catch(e){} };
+function bufToB64(buf){ const u = new Uint8Array(buf); let s = ''; const C = 0x8000; for(let i = 0; i < u.length; i += C) s += String.fromCharCode.apply(null, u.subarray(i, i + C)); return btoa(s); }
+function b64ToBuf(b){ const s = atob(b), u = new Uint8Array(s.length); for(let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; }
+
+// ---- État ----
+let M = null;            // { scene, nodes[], rest:Map, buf, ext, id }
+let selected = -1;       // index du nœud sélectionné dans M.nodes
+const rigCfg = {};       // slot -> { idx, axis, sign, amp, test }
+SLOTS.forEach(([k]) => rigCfg[k] = { idx:-1, axis:'x', sign:1, amp:1, test:0 });
+const fit = { scale:1, rotY:0, offY:0, center:[0,0,0] };
+
+// ---- Scène 3D ----
+const renderer = new THREE.WebGLRenderer({ canvas:$('c'), antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputEncoding = THREE.sRGBEncoding;
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x1d1640);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 200); camera.position.set(3.2, 1.8, 4.2);
+const controls = new THREE.OrbitControls(camera, $('c')); controls.target.set(0, 1, 0); controls.update();
+scene.add(new THREE.HemisphereLight(0xffffff, 0x554488, 0.9));
+const dl = new THREE.DirectionalLight(0xffffff, 0.9); dl.position.set(3, 6, 4); scene.add(dl);
+scene.add(new THREE.GridHelper(10, 20, 0x6a58b8, 0x2e2560));
+const refBox = new THREE.Box3Helper(new THREE.Box3(new THREE.Vector3(-0.45, 0, -0.3), new THREE.Vector3(0.45, TARGET_H, 0.3)), 0xffe066); scene.add(refBox);
+const front = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0.02, 0), 1.2, 0x5b93f0, 0.25, 0.15); scene.add(front);
+const marker = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 8), new THREE.MeshBasicMaterial({ color:0xff3c8c, depthTest:false })); marker.renderOrder = 10; marker.visible = false; scene.add(marker);
+const holder = new THREE.Group(), inner = new THREE.Group(); holder.add(inner); scene.add(holder);
+
+function resize(){ const v = $('view'); renderer.setSize(v.clientWidth, v.clientHeight, false); camera.aspect = v.clientWidth / Math.max(1, v.clientHeight); camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+
+function msg(t, ms){ const m = $('msg'); m.textContent = t; m.style.display = 'block'; clearTimeout(msg.t); msg.t = setTimeout(() => m.style.display = 'none', ms || 3500); }
+
+// ---- Chargement modèle ----
+function loadModelBuffer(buf, ext, cb){
+  if(!THREE.GLTFLoader){ msg('GLTFLoader non chargé (internet requis).', 6000); return; }
+  new THREE.GLTFLoader().parse(buf, '', g => {
+    if(M){ inner.remove(M.scene); }
+    const nodes = [], rest = new Map();
+    g.scene.traverse(o => { if(o !== g.scene){ nodes.push(o); rest.set(o, o.quaternion.clone()); } if(o.isMesh){ o.frustumCulled = false; } });
+    M = { scene:g.scene, nodes, rest, buf, ext, id:(M && M.id) || null };
+    inner.add(g.scene); selected = -1;
+    SLOTS.forEach(([k]) => { rigCfg[k].idx = -1; });
+    buildTree(); buildSlotSelects(); applyFit();
+    const bones = nodes.filter(n => n.isBone).length, meshes = nodes.filter(n => n.isMesh || n.isSkinnedMesh).length;
+    $('info').textContent = `${nodes.length} nœuds · ${bones} os · ${meshes} meshes · ${(buf.byteLength/1048576).toFixed(2)} Mo` + (g.animations && g.animations.length ? ` · ${g.animations.length} animation(s) intégrée(s) (ignorées, le jeu anime lui-même)` : '');
+    if(cb) cb(); else { autoFit(); guessRig(true); }
+  }, err => msg('Modèle illisible : ' + (err && err.message || err), 6000));
+}
+function loadModelFile(f){
+  if(!f) return; const ext = f.name.split('.').pop().toLowerCase();
+  if(!['glb', 'gltf'].includes(ext)){ msg('Format non supporté : convertis ton modèle en .glb', 6000); return; }
+  f.arrayBuffer().then(buf => {
+    if(M) M.id = null;
+    loadModelBuffer(buf, ext);
+    if(!$('name').dataset.edited) $('name').value = f.name.replace(/\.[^.]+$/, '').toUpperCase().slice(0, 20);
+  });
+}
+
+// ---- Placement ----
+function applyFit(){
+  holder.scale.setScalar(fit.scale); holder.rotation.y = fit.rotY; holder.position.y = fit.offY;
+  inner.position.set(-fit.center[0], -fit.center[1], -fit.center[2]);
+  $('scale').value = +fit.scale.toPrecision(5); $('offY').value = fit.offY; $('offYv').textContent = fit.offY.toFixed(2);
+  const deg = Math.round(fit.rotY * 180 / Math.PI); $('rotY').value = deg; $('rotYv').textContent = deg;
+}
+function autoFit(){
+  if(!M) return;
+  const sv = [holder.scale.x, holder.rotation.y, holder.position.y, inner.position.x, inner.position.y, inner.position.z];
+  holder.scale.setScalar(1); holder.rotation.y = 0; holder.position.set(0, 0, 0); inner.position.set(0, 0, 0);
+  M.nodes.forEach(n => n.quaternion.copy(M.rest.get(n)));
+  scene.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(M.scene), size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  if(!isFinite(size.y) || size.y <= 0){ msg('Impossible de mesurer le modèle : règle l\'échelle à la main.', 5000); holder.scale.setScalar(sv[0]); return; }
+  fit.scale = TARGET_H / size.y; fit.center = [c.x, box.min.y, c.z]; fit.offY = 0;
+  applyFit(); msg('Modèle ajusté à la taille du jeu. Vérifie qu\'il regarde vers la flèche bleue (sinon tourne-le).');
+}
+$('btnFit').onclick = autoFit;
+$('btnRotL').onclick = () => { fit.rotY -= Math.PI/2; applyFit(); };
+$('btnRotR').onclick = () => { fit.rotY += Math.PI/2; applyFit(); };
+$('btnRot180').onclick = () => { fit.rotY += Math.PI; applyFit(); };
+$('scale').oninput = e => { const v = parseFloat(e.target.value); if(v > 0){ fit.scale = v; holder.scale.setScalar(v); } };
+document.querySelectorAll('[data-sc]').forEach(b => b.onclick = () => { fit.scale *= parseFloat(b.dataset.sc); applyFit(); });
+$('offY').oninput = e => { fit.offY = parseFloat(e.target.value); applyFit(); };
+$('rotY').oninput = e => { fit.rotY = parseFloat(e.target.value) * Math.PI / 180; applyFit(); };
+$('name').oninput = e => { e.target.dataset.edited = '1'; };
+
+// ---- Arbre des nœuds ----
+function depthOf(n){ let d = 0; while(n.parent && n.parent !== M.scene){ d++; n = n.parent; } return d; }
+function nodeLabel(n, i){ return `${i} · ${n.name || '(sans nom)'}`; }
+function buildTree(){
+  const t = $('tree'), f = $('filter').value.trim().toLowerCase(); t.textContent = '';
+  if(!M) return;
+  M.nodes.forEach((n, i) => {
+    if(f && !(n.name || '').toLowerCase().includes(f)) return;
+    const d = document.createElement('div'); d.style.paddingLeft = (6 + (f ? 0 : depthOf(n) * 10)) + 'px';
+    d.className = i === selected ? 'sel' : '';
+    d.innerHTML = `${n.isBone ? '🦴' : (n.isMesh ? '▣' : '▫')} ${escapeHtml(n.name || '(sans nom)')}<span class="tag">#${i}</span>`;
+    d.onclick = () => { selected = i; buildTree(); updateSelInfo(); };
+    t.appendChild(d);
+  });
+}
+const escapeHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+function updateSelInfo(){ $('selInfo').textContent = selected >= 0 ? 'Sélection : ' + nodeLabel(M.nodes[selected], selected) : 'Sélection : —'; }
+$('filter').oninput = buildTree;
+
+// ---- Panneaux d'articulations ----
+function buildSlotSelects(){
+  const box = $('slots'); box.textContent = '';
+  SLOTS.forEach(([k, label]) => {
+    const c = rigCfg[k], d = document.createElement('div'); d.className = 'slot';
+    const opts = M ? M.nodes.map((n, i) => `<option value="${i}">${n.isBone ? '🦴 ' : ''}${escapeHtml(nodeLabel(n, i))}</option>`).join('') : '';
+    d.innerHTML = `<b>${label}</b>
+      <div class="row" style="margin-top:4px"><select data-f="idx"><option value="-1">— aucun —</option>${opts}</select><button data-f="pick" title="Utiliser le nœud sélectionné dans la liste">← sélection</button></div>
+      <div class="row" style="margin-top:4px"><select data-f="axis"><option value="x">Axe X</option><option value="y">Axe Y</option><option value="z">Axe Z</option></select><label style="margin:0;flex:none"><input type="checkbox" data-f="inv"> inverser</label></div>
+      <label style="margin-top:4px">Amplitude : <span data-v="amp"></span></label><input type="range" data-f="amp" min="0" max="2.5" step="0.05">
+      <label>Test manuel : <span data-v="test"></span> rad</label><input type="range" data-f="test" min="-1.6" max="1.6" step="0.05">`;
+    const q = f => d.querySelector(`[data-f="${f}"]`), v = f => d.querySelector(`[data-v="${f}"]`);
+    const sync = () => { q('idx').value = c.idx; q('axis').value = c.axis; q('inv').checked = c.sign < 0; q('amp').value = c.amp; q('test').value = c.test; v('amp').textContent = (+c.amp).toFixed(2); v('test').textContent = (+c.test).toFixed(2); };
+    q('idx').onchange = e => { setSlotNode(k, parseInt(e.target.value)); };
+    q('pick').onclick = () => { if(selected < 0) msg('Clique d\'abord un nœud dans la liste.'); else { setSlotNode(k, selected); sync(); } };
+    q('axis').onchange = e => { c.axis = e.target.value; };
+    q('inv').onchange = e => { c.sign = e.target.checked ? -1 : 1; };
+    q('amp').oninput = e => { c.amp = parseFloat(e.target.value); v('amp').textContent = c.amp.toFixed(2); };
+    q('test').oninput = e => { c.test = parseFloat(e.target.value); v('test').textContent = c.test.toFixed(2); $('anim').value = 'manual'; };
+    d._sync = sync; sync(); box.appendChild(d);
+  });
+}
+function syncSlots(){ [...$('slots').children].forEach(d => d._sync && d._sync()); }
+function setSlotNode(k, idx){
+  M && M.nodes.forEach(n => n.quaternion.copy(M.rest.get(n)));
+  rigCfg[k].idx = idx;
+}
+
+// ---- Détection automatique par noms ----
+function guessRig(silent){
+  if(!M) return;
+  const L = n => /left|(^|[^a-z])l([^a-z]|$)|[a-z]L$|^L[A-Z_]/.test(n), R = n => /right|(^|[^a-z])r([^a-z]|$)|[a-z]R$|^R[A-Z_]/.test(n);
+  const side = (name, s) => { const lo = name.toLowerCase(); if(s === 'L') return /left/.test(lo) || (!/right/.test(lo) && L(name)); return /right/.test(lo) || (!/left/.test(lo) && R(name)); };
+  const find = (tests, s) => { for(const t of tests){ const i = M.nodes.findIndex(n => (n.isBone || !n.isMesh) && t(n.name || '') && (!s || side(n.name || '', s))); if(i >= 0) return i; } return -1; };
+  const lo = n => n.toLowerCase();
+  const arm = [n => /upperarm|upper_arm|upper arm/.test(lo(n)), n => /arm/.test(lo(n)) && !/fore|lower|low|hand/.test(lo(n)), n => /shoulder|clavicle/.test(lo(n))];
+  const leg = [n => /upleg|thigh|upperleg|upper_leg|upper leg/.test(lo(n)), n => /leg/.test(lo(n)) && !/low|calf|shin|foot|toe/.test(lo(n)), n => /hip/.test(lo(n)) && !/hips$/.test(lo(n))];
+  const head = [n => /(^|[^a-z])head($|[^a-z])|head$/.test(lo(n)) && !/top|end/.test(lo(n)), n => /neck/.test(lo(n))];
+  rigCfg.head.idx = find(head); rigCfg.armL.idx = find(arm, 'L'); rigCfg.armR.idx = find(arm, 'R'); rigCfg.legL.idx = find(leg, 'L'); rigCfg.legR.idx = find(leg, 'R');
+  syncSlots();
+  const n = SLOTS.filter(([k]) => rigCfg[k].idx >= 0).length;
+  msg(n ? `${n}/5 articulations trouvées. Vérifie avec l'animation de test et corrige l'axe si besoin.` : 'Aucun os reconnu : choisis les articulations à la main (liste des nœuds).', 6000);
+}
+$('btnGuess').onclick = () => guessRig(false);
+
+// ---- Animation de test ----
+let tick = 0;
+function currentVals(){
+  const m = $('anim').value;
+  if(m === 'manual'){ const o = {}; SLOTS.forEach(([k]) => o[k] = rigCfg[k].test); return o; }
+  if(m === 'rest') return { head:0, armL:0, armR:0, legL:0, legR:0 };
+  if(m === 'jump') return { head:-0.18, armL:-0.4, armR:0.4, legL:0.4, legR:-0.4 };
+  const sp = m === 'run' ? 0.4 : 0.22, sw = Math.sin(tick * sp) * 0.75;
+  return { head:Math.sin(tick * sp * 2) * 0.05, legL:sw, legR:-sw, armL:-sw, armR:sw };
+}
+function currentRig(){
+  const rig = {};
+  SLOTS.forEach(([k]) => { const c = rigCfg[k]; if(c.idx >= 0 && M && M.nodes[c.idx]){ const node = M.nodes[c.idx]; rig[k] = { node, rest:M.rest.get(node), axis:c.axis, sign:c.sign, amp:c.amp }; } });
+  return rig;
+}
+const tmpV = new THREE.Vector3();
+function loop(){
+  requestAnimationFrame(loop); tick += 1; controls.update();
+  if(M){
+    M.nodes.forEach(n => n.quaternion.copy(M.rest.get(n)));
+    rigApply(currentRig(), currentVals());
+    if(selected >= 0){ M.nodes[selected].getWorldPosition(tmpV); marker.position.copy(tmpV); marker.visible = true; } else marker.visible = false;
+  }
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(loop);
+
+// ---- Export / import ----
+function slug(s){ return String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 20) || 'perso'; }
+function buildData(){
+  if(!M){ msg('Charge d\'abord un modèle 3D.'); return null; }
+  if(!M.id) M.id = 'c_' + slug($('name').value) + '_' + Date.now().toString(36);
+  const rig = {};
+  SLOTS.forEach(([k]) => {
+    const c = rigCfg[k]; if(c.idx < 0) return;
+    const path = []; let n = M.nodes[c.idx];
+    while(n && n !== M.scene){ path.unshift(n.parent.children.indexOf(n)); n = n.parent; }
+    rig[k] = { path, name:M.nodes[c.idx].name || '', axis:c.axis, sign:c.sign, amp:c.amp };
+  });
+  return { format:'zkrchar', v:1, id:M.id, name:$('name').value.trim() || 'PERSO', theme:$('theme').value.trim(), quest:$('quest').value.trim(),
+    color:$('color').value, unlock:{ type:$('unlock').value, n:parseInt($('unlockN').value) || 0 },
+    fit:{ scale:fit.scale, rotY:fit.rotY, offY:fit.offY, center:fit.center.slice() }, rig, model:{ ext:M.ext, b64:bufToB64(M.buf) } };
+}
+$('btnExport').onclick = () => {
+  const d = buildData(); if(!d) return;
+  const blob = new Blob([JSON.stringify(d)], { type:'application/json' }), a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = slug(d.name) + '.zkrchar'; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  msg('Fichier exporté : ' + a.download + ' — importe-le dans le jeu (écran Personnage).', 6000);
+};
+$('btnIdb').onclick = async () => {
+  const d = buildData(); if(!d) return;
+  try { await IDB.put(d); notifyGame(); refreshSaved(); autoPublish(); msg('Enregistré. Le jeu (même navigateur, même site) se met à jour tout seul : le perso apparaît dans « Personnages ».', 7000); }
+  catch(e){ msg('Enregistrement navigateur impossible (' + (e && e.message || e) + '). Utilise « Exporter .zkrchar ».', 7000); }
+};
+function openChar(f){
+  if(!f) return;
+  f.text().then(t => { const d = JSON.parse(t); if(d.format !== 'zkrchar') throw new Error('format'); applyCharData(d); })
+   .catch(() => msg('Fichier .zkrchar invalide.', 5000));
+}
+function applyCharData(d){
+  try {
+    $('name').value = d.name || ''; $('name').dataset.edited = '1'; $('theme').value = d.theme || ''; $('quest').value = d.quest || ''; $('color').value = d.color || '#39b6ff';
+    $('unlock').value = (d.unlock && d.unlock.type) || 'always'; $('unlockN').value = (d.unlock && d.unlock.n) || 0;
+    if(M) M.id = null;
+    loadModelBuffer(b64ToBuf(d.model.b64), d.model.ext || 'glb', () => {
+      M.id = d.id; Object.assign(fit, d.fit || {}); fit.center = (d.fit && d.fit.center) || [0, 0, 0]; applyFit();
+      SLOTS.forEach(([k]) => {
+        const r = d.rig && d.rig[k], c = rigCfg[k]; c.idx = -1; if(!r) return;
+        const node = rigResolve(M.scene, r.path || []); if(node){ c.idx = M.nodes.indexOf(node); c.axis = r.axis; c.sign = r.sign; c.amp = r.amp; }
+      });
+      syncSlots(); msg('Perso rouvert : ' + d.name);
+    });
+  } catch(e){ msg('Fichier .zkrchar invalide.', 5000); }
+}
+
+// ---- Fichiers (clic + glisser-déposer) ----
+$('drop').onclick = () => $('fileModel').click();
+$('fileModel').onchange = e => { loadModelFile(e.target.files[0]); e.target.value = ''; };
+$('btnLoadChar').onclick = () => $('fileChar').click();
+$('fileChar').onchange = e => { openChar(e.target.files[0]); e.target.value = ''; };
+['dragenter', 'dragover'].forEach(ev => addEventListener(ev, e => { e.preventDefault(); $('drop').classList.add('on'); }));
+['dragleave', 'drop'].forEach(ev => addEventListener(ev, e => { e.preventDefault(); $('drop').classList.remove('on'); }));
+addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if(!f) return; if(/\.zkrchar$|\.json$/i.test(f.name)) openChar(f); else loadModelFile(f); });
+buildSlotSelects();
+
+// ---- Persos enregistrés + catalogue public ----
+async function refreshSaved(){
+  const box = $('saved'); box.textContent = '';
+  let all = []; try { all = await IDB.all(); } catch(e){}
+  if(!all.length){ box.innerHTML = '<div class="small">Aucun perso enregistré dans ce navigateur.</div>'; return; }
+  all.forEach(d => {
+    const r = document.createElement('div'); r.className = 'slot';
+    r.innerHTML = `<b>${escapeHtml(d.name || 'PERSO')}</b> <span class="small">${escapeHtml(d.theme || '')}</span><div class="row" style="margin-top:4px"><button data-a="open">Ouvrir</button><button data-a="del">Supprimer</button></div>`;
+    r.querySelector('[data-a="open"]').onclick = () => applyCharData(d);
+    r.querySelector('[data-a="del"]').onclick = async () => {
+      if(!confirm('Supprimer ' + (d.name || 'ce perso') + ' ?')) return;
+      try { await IDB.del(d.id); notifyGame(); refreshSaved(); autoPublish(); msg('Perso supprimé (le jeu se met à jour).'); } catch(e){ msg('Suppression impossible.'); }
+    };
+    box.appendChild(r);
+  });
+}
+$('btnCatalog').onclick = async () => {
+  let all = []; try { all = await IDB.all(); } catch(e){}
+  if(!all.length){ msg('Aucun perso enregistré : clique d\'abord « Enregistrer dans ce navigateur ».', 5000); return; }
+  const blob = new Blob([JSON.stringify({ format:'zkrcatalog', v:1, chars:all })], { type:'application/json' }), a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'zkr3d-chars.json'; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  msg(all.length + ' perso(s) exporté(s) : place zkr3d-chars.json à côté de zkr3d.html.', 8000);
+};
+
+// ---- Publication GitHub (catalogue pour tous les joueurs) ----
+const PUBK = 'zkr3d_pub', PUBDEF = { repo:'', branch:'main', path:'zkr3d-chars.json', token:'', auto:true };
+function pubCfg(){ try { return Object.assign({}, PUBDEF, JSON.parse(localStorage.getItem(PUBK) || '{}')); } catch(e){ return Object.assign({}, PUBDEF); } }
+function pubSave(){ try { localStorage.setItem(PUBK, JSON.stringify({ repo:$('pubRepo').value.trim(), branch:$('pubBranch').value.trim() || 'main', path:$('pubPath').value.trim() || 'zkr3d-chars.json', token:$('pubToken').value.trim(), auto:$('pubAuto').checked })); } catch(e){} }
+(function(){ const c = pubCfg(); $('pubRepo').value = c.repo; $('pubBranch').value = c.branch; $('pubPath').value = c.path; $('pubToken').value = c.token; $('pubAuto').checked = c.auto;
+  ['pubRepo', 'pubBranch', 'pubPath', 'pubToken'].forEach(id => $(id).oninput = pubSave); $('pubAuto').onchange = pubSave; })();
+async function publishAll(silent){
+  const c = pubCfg();
+  if(!/^[\w.-]+\/[\w.-]+$/.test(c.repo) || !c.token){ if(!silent) msg('Renseigne le dépôt (utilisateur/repo) et le token GitHub.', 6000); return false; }
+  const path = c.path.replace(/^\/+/, ''), api = 'https://api.github.com/repos/' + c.repo + '/contents/' + path.split('/').map(encodeURIComponent).join('/');
+  const h = { Authorization:'Bearer ' + c.token, 'X-GitHub-Api-Version':'2022-11-28' };
+  try {
+    msg('Publication en cours…', 60000);
+    const all = await IDB.all();
+    const json = JSON.stringify({ format:'zkrcatalog', v:1, chars:all });
+    let sha;
+    const g = await fetch(api + '?ref=' + encodeURIComponent(c.branch), { headers:Object.assign({ Accept:'application/vnd.github.object+json' }, h) });
+    if(g.ok) sha = (await g.json()).sha; else if(g.status !== 404) throw new Error('lecture ' + g.status + (g.status === 401 ? ' (token invalide)' : ''));
+    const body = { message:'Catalogue personnages ZKR 3D (' + all.length + ')', content:bufToB64(new TextEncoder().encode(json)), branch:c.branch }; if(sha) body.sha = sha;
+    const r = await fetch(api, { method:'PUT', headers:Object.assign({ Accept:'application/vnd.github+json', 'Content-Type':'application/json' }, h), body:JSON.stringify(body) });
+    if(!r.ok){ let t = ''; try { t = (await r.json()).message; } catch(e){} throw new Error(r.status + ' ' + t); }
+    msg('Publié pour tous les joueurs (' + all.length + ' perso' + (all.length > 1 ? 's' : '') + '). Visible dans 1 à 2 min (GitHub Pages).', 9000); return true;
+  } catch(e){ msg('Publication impossible : ' + (e && e.message || e), 9000); return false; }
+}
+function autoPublish(){ if(pubCfg().auto) publishAll(true); }
+$('btnPublish').onclick = () => publishAll(false);
+refreshSaved();
+</script>
+</body>
+</html>
