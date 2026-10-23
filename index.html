@@ -6,6 +6,8 @@
 <title>ZKR 3D - Le Boss de la Street</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 <style>
 :root{--acc:rgb(70,160,255)}
 html,body{margin:0;height:100%;overflow:hidden;background:#140f28;font-family:Arial,Helvetica,sans-serif;color:#fff;-webkit-user-select:none;user-select:none}
@@ -54,17 +56,36 @@ h2{margin:0;font-size:26px;letter-spacing:1px;text-shadow:0 0 14px var(--acc)}
 .tb:active{background:rgba(255,255,255,.4)}
 #tl,#tr{display:flex;gap:10px;align-items:flex-end}
 .ico{position:fixed;top:10px;z-index:30;width:40px;height:40px;border-radius:50%;background:rgba(20,15,35,.75);border:2px solid rgba(255,255,255,.4);color:#fff;font-size:18px;cursor:pointer}
+
+.tin{background:rgba(255,255,255,.1);border:2px solid rgba(255,255,255,.4);border-radius:99px;color:#fff;padding:10px 16px;font:bold 15px Arial;text-align:center;outline:none;min-width:230px;box-sizing:border-box;-webkit-user-select:text;user-select:text}
+.tin:focus{border-color:#8fb4ff}
+#onlinePanel{background:rgba(12,9,26,.93)}
+.guestOnly{display:none}body.guestMode .guestOnly{display:block}body.guestMode .hostOnly{display:none!important}
+#netPill{pointer-events:auto;cursor:pointer;display:none}
+#specBar{position:fixed;left:50%;top:92px;transform:translateX(-50%);z-index:10;display:none;background:rgba(0,0,0,.65);border:1px solid rgba(255,207,95,.6);color:#ffcf5f;border-radius:99px;padding:6px 16px;font-weight:bold;font-size:14px;white-space:nowrap}
+#netBanner{position:fixed;left:50%;top:46%;transform:translateX(-50%);z-index:14;display:none;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.35);border-radius:14px;padding:12px 22px;font-weight:bold;font-size:17px;text-align:center}
+#tags{position:fixed;inset:0;pointer-events:none;z-index:9;overflow:hidden}
+.ntag{position:absolute;transform:translate(-50%,-100%);font-weight:bold;font-size:13px;text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap;display:none}
+#chatPanel{position:fixed;left:10px;bottom:14px;width:min(290px,62vw);z-index:12;display:none;flex-direction:column;background:rgba(14,10,24,.72);border:1.5px solid rgba(255,255,255,.3);border-radius:10px;overflow:hidden;font-size:13px;-webkit-user-select:text;user-select:text}
+#chatPanel.active{display:flex}
+body.touchdev #chatPanel{bottom:176px}
+#chatMessages{max-height:110px;overflow-y:auto;padding:6px 8px;display:flex;flex-direction:column;gap:4px}
+.chatMsg{line-height:1.3;word-break:break-word}.chatName{font-weight:bold;margin-right:4px}
+.chatMsg.self .chatName{color:#5fd0ff}.chatMsg.other .chatName{color:#ffcf5f}
+#chatRow{display:flex;gap:5px;padding:5px;border-top:1px solid rgba(255,255,255,.2)}
+#chatInput{flex:1;min-width:0;padding:6px 8px;border-radius:8px;border:1.5px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#fff;font:13px Arial;outline:none}
+#chatSendBtn{background:linear-gradient(#2f6fe0,#1c4aa8);border:1.5px solid #5b93f0;color:#fff;border-radius:8px;padding:0 10px;font-weight:bold;cursor:pointer}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="fade"></div><div id="dmg"></div>
 <div id="hud">
-  <div id="hudLeft"><span class="pill" id="hearts"></span><span class="pill" id="scoreP"></span><span class="pill" id="chipCombo" style="display:none"></span><span class="pill" id="chipPower" style="display:none"></span></div>
+  <div id="hudLeft"><span class="pill" id="hearts"></span><span class="pill" id="scoreP"></span><span class="pill" id="chipCombo" style="display:none"></span><span class="pill" id="chipPower" style="display:none"></span><span class="pill" id="netPill" title="Cliquer pour copier le code du salon"></span></div>
   <div id="hudRight"><div id="lvlName"></div><div id="hudHint">M : carte · C : personnage · H : accueil</div></div>
 </div>
 <div id="bossBar"><div id="bossName"></div><div id="bossTrack"><div id="bossFill"></div></div></div>
-<div id="floats"></div>
+<div id="floats"></div><div id="tags"></div><div id="specBar"></div><div id="netBanner"></div>
 <button class="ico" id="fsBtn" style="right:10px" title="Plein écran">⛶</button>
 
 <div id="ui">
@@ -76,11 +97,22 @@ h2{margin:0;font-size:26px;letter-spacing:1px;text-shadow:0 0 14px var(--acc)}
       <button class="btn" data-key="m" style="min-width:180px">🗺 CARTE (M)</button>
       <button class="btn" data-key="c" style="min-width:180px">🧑 PERSONNAGES (C)</button>
     </div>
+    <button class="btn" data-key="o" style="min-width:376px">🌐 JOUER EN LIGNE (O)</button>
     <div class="row">
       <label><input type="checkbox" id="musicToggle" checked> Musique</label>
       <label>Volume <input type="range" id="vol" min="0" max="100" value="45"></label>
     </div>
     <div class="small">Flèches / Q D : bouger · ESPACE / ↑ : sauter · ↓ / S : s'accroupir &amp; glisser · E : tir · Manette : stick + A / X · Écrase les ennemis, ramasse ⭐ et ⚡, bats le boss pour ouvrir l'arrivée !</div>
+  </div>
+
+  <div class="panel" id="onlinePanel">
+    <h2>🌐 JOUER EN LIGNE (jusqu'à 4 joueurs)</h2>
+    <input class="tin" id="nameInput" maxlength="14" placeholder="Ton pseudo" autocomplete="off">
+    <button class="btn pri" id="onlineCreateBtn">CRÉER UN SALON</button>
+    <div class="row"><input class="tin" id="onlineCodeInput" maxlength="5" placeholder="CODE" autocomplete="off" style="text-transform:uppercase;min-width:0;width:120px"><button class="btn" id="onlineJoinBtn" style="min-width:150px">REJOINDRE</button></div>
+    <div class="small" id="onlineStatus">Non connecté.</div>
+    <div class="small">Tous les joueurs jouent les mêmes niveaux, en même temps. L'hôte (créateur du salon) lance les niveaux. Chat en jeu : T.</div>
+    <button class="btn" data-key="Escape">RETOUR</button>
   </div>
 
   <div class="panel" id="mapPanel">
@@ -106,21 +138,24 @@ h2{margin:0;font-size:26px;letter-spacing:1px;text-shadow:0 0 14px var(--acc)}
     <div id="stars"></div>
     <div id="clearScore" style="font-size:22px;font-weight:bold"></div>
     <div id="clearInfo"></div>
-    <button class="btn pri" data-key=" ">CONTINUER (ESPACE)</button>
-    <div class="row"><button class="btn" data-key="r" style="min-width:150px">REJOUER (R)</button><button class="btn" data-key="m" style="min-width:150px">CARTE (M)</button></div>
+    <button class="btn pri hostOnly" data-key=" ">CONTINUER (ESPACE)</button>
+    <div class="row hostOnly"><button class="btn" data-key="r" style="min-width:150px">REJOUER (R)</button><button class="btn" data-key="m" style="min-width:150px">CARTE (M)</button></div>
+    <div class="small guestOnly">En attente de l'hôte…</div>
   </div>
 
   <div class="panel" id="overPanel">
     <h2 style="font-size:46px">GAME OVER</h2>
-    <button class="btn pri" data-key=" " id="overBtn">REJOUER (ESPACE)</button>
-    <button class="btn" data-key="m">CARTE DES NIVEAUX (M)</button>
+    <button class="btn pri hostOnly" data-key=" " id="overBtn">REJOUER (ESPACE)</button>
+    <button class="btn hostOnly" data-key="m">CARTE DES NIVEAUX (M)</button>
+    <div class="small guestOnly">En attente de l'hôte…</div>
   </div>
 
   <div class="panel" id="victoryPanel">
     <h2 style="font-size:46px">VICTOIRE TOTALE !</h2>
     <div>Tu as fini le jeu !</div>
-    <button class="btn pri" data-key=" ">NOUVELLE PARTIE (ESPACE)</button>
-    <button class="btn" data-key="m">CARTE DES NIVEAUX (M)</button>
+    <button class="btn pri hostOnly" data-key=" ">NOUVELLE PARTIE (ESPACE)</button>
+    <button class="btn hostOnly" data-key="m">CARTE DES NIVEAUX (M)</button>
+    <div class="small guestOnly">En attente de l'hôte…</div>
   </div>
 </div>
 
@@ -129,6 +164,10 @@ h2{margin:0;font-size:26px;letter-spacing:1px;text-shadow:0 0 14px var(--acc)}
   <div id="tr"><button class="tb" id="tbS" style="background:rgba(255,140,40,.35)">TIR</button><button class="tb big" id="tbJ">SAUT</button></div>
 </div>
 <button class="ico" id="tbM" style="left:10px;display:none">☰</button>
+<div id="chatPanel">
+  <div id="chatMessages"></div>
+  <div id="chatRow"><input id="chatInput" maxlength="150" placeholder="Chat (T)…" autocomplete="off"><button id="chatSendBtn">OK</button></div>
+</div>
 
 <script>
 'use strict';
@@ -410,6 +449,7 @@ class Projectile {
   constructor(x, y, dir, color, hostile){
     this.x = x; this.y = y; this.w = 16; this.h = 8; this.dir = dir; this.vx = PROJECTILE_SPEED * dir;
     this.life = PROJECTILE_LIFE; this.dead = false; this.color = color || '#5b93f0'; this.hostile = !!hostile;
+    this.x0 = x; this.t0 = serverNow(); this.owner = null;
   }
   get rect(){ return {x:this.x, y:this.y, w:this.w, h:this.h}; }
   update(solids){
@@ -642,29 +682,31 @@ let levelClearStars = 3, levelClearCoins = 0, levelClearCoinsTotal = 0;
 let unlockedFlat = 0, checkpointWorld = 0, checkpointScore = 0;
 let mapCursorWorld = 0, mapCursorLevel = 0, mapReturnsToPlay = false, charCursor = 0, charReturnsToPlay = false;
 let renderAlpha = 0;
+let overlayPrev = 'playing';
 let savedData = null;
 const SAVE_KEY = 'zkr3d_save_v1';
 
 function triggerShake(mag, dur){ screenShakeMag = Math.max(screenShakeMag, mag); screenShakeTimer = Math.max(screenShakeTimer, dur); }
 function saveGame(){
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ unlockedFlat, checkpointWorld, checkpointScore, currentCharacterId, musicEnabled, musicVolume, ST }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ playerName, unlockedFlat, checkpointWorld, checkpointScore, currentCharacterId, musicEnabled, musicVolume, ST }));
   } catch(e){}
 }
 function loadGame(){ try { const r = localStorage.getItem(SAVE_KEY); return r ? JSON.parse(r) : null; } catch(e){ return null; } }
 function applySaved(d){
   if(!d) return;
+  if(d.playerName && String(d.playerName).trim()) playerName = String(d.playerName).slice(0, 14);
   unlockedFlat = d.unlockedFlat ?? 0; checkpointWorld = d.checkpointWorld ?? 0; checkpointScore = d.checkpointScore ?? 0;
   currentCharacterId = d.currentCharacterId ?? 'zkr'; musicEnabled = d.musicEnabled ?? true; musicVolume = d.musicVolume ?? 0.45;
   if(d.ST) Object.keys(ST).forEach(k => { ST[k] = d.ST[k] || 0; });
 }
 
-function applyCoinPickup(c, p){
-  c.taken = true; ST.coins++;
+function applyCoinPickup(c, p, remote){
+  c.taken = true; if(!remote) ST.coins++;
   if(c.type === 'star'){
     score += 5; p.powerupType = 'star'; p.powerupTimer = 360;
     spawnParticles(c.x, c.y, 16, '#ffe066', {spd:2.6, spdVar:2.2, life:26, size:3.2, up:1});
-    spawnFloatText(c.x, c.y-10, 'ÉTOILE !', '#ffe066'); triggerShake(4, 10);
+    spawnFloatText(c.x, c.y-10, 'ÉTOILE !', '#ffe066'); if(!remote) triggerShake(4, 10);
   } else if(c.type === 'speed'){
     score += 5; p.powerupType = 'speed'; p.powerupTimer = 360;
     spawnParticles(c.x, c.y, 16, '#5ad1ff', {spd:2.6, spdVar:2.2, life:26, size:3.2, up:1});
@@ -692,6 +734,10 @@ function resolveEnemyHit(e, particleColor, textColor){
 }
 function checkLifeRegen(){
   const m = Math.floor(score / 50);
+  if(onlineMode){
+    if(isHost && m > lastLifeMilestone){ for(let i = lastLifeMilestone; i < m; i++) grantLifeRegenTick(); }
+    lastLifeMilestone = m; return;
+  }
   if(m > lastLifeMilestone && lives < MAX_LIVES) lives++;
   lastLifeMilestone = m;
 }
@@ -713,6 +759,11 @@ function initLevel(){
   projectiles = []; clearParticles();
   cameraX = 0; prevCam = 0; livesLostThisLevel = 0; comboCount = 0;
   lastLifeMilestone = Math.floor(score / 50);
+  if(onlineMode && isHost){
+    onlineLevelStartT = serverNow(); onlineLs = onlineLevelStartT; onlineWorld = worldIndex; onlineLevel = levelIndex;
+    onlinePlatTick = 0; localKilled = {}; stompSentAt = {}; myShots = []; netProjCache.clear();
+    const sp = mySpawn(); player.reset(sp.x, sp.y); lastBroadcastState = null;
+  }
   buildScene3D();
   triggerFade();
 }
@@ -736,33 +787,35 @@ function advanceAfterLevelClear(){
   }
   saveGame();
 }
-function retryCurrentLevel(){ lives = MAX_LIVES; initLevel(); setState('playing'); saveGame(); }
+function retryCurrentLevel(){ lives = MAX_LIVES; resetOnlineLives(); initLevel(); setState('playing'); saveGame(); }
 function startNewGame(){
-  worldIndex = 0; levelIndex = 0; lives = MAX_LIVES; score = 0; unlockedFlat = Math.max(unlockedFlat, 0);
+  worldIndex = 0; levelIndex = 0; lives = MAX_LIVES; score = 0; resetOnlineLives(); unlockedFlat = Math.max(unlockedFlat, 0);
   checkpointWorld = 0; checkpointScore = 0; livesLostThisWorld = 0;
   initLevel(); setState('playing'); saveGame();
 }
 function respawnAtCheckpoint(){
-  worldIndex = checkpointWorld; levelIndex = 0; lives = MAX_LIVES; score = checkpointScore;
+  worldIndex = checkpointWorld; levelIndex = 0; lives = MAX_LIVES; score = checkpointScore; resetOnlineLives();
   initLevel(); setState('playing'); saveGame();
 }
-function openMap(fromPlay){ mapCursorWorld = worldIndex; mapCursorLevel = levelIndex; mapReturnsToPlay = !!fromPlay; setState('map'); }
+function openMap(fromPlay){ overlayPrev = state; mapCursorWorld = worldIndex; mapCursorLevel = levelIndex; mapReturnsToPlay = !!fromPlay; setState('map'); }
 function tryLaunchFromMap(){
+  if(onlineMode && !isHost) return;
   if(FLAT(mapCursorWorld, mapCursorLevel) > unlockedFlat) return;
-  worldIndex = mapCursorWorld; levelIndex = mapCursorLevel; lives = MAX_LIVES;
+  worldIndex = mapCursorWorld; levelIndex = mapCursorLevel; lives = MAX_LIVES; resetOnlineLives();
   checkpointWorld = mapCursorWorld; checkpointScore = score; livesLostThisWorld = 0;
   initLevel(); setState('playing'); saveGame();
 }
 function openChars(fromPlay){
+  overlayPrev = state;
   charReturnsToPlay = !!fromPlay;
   charCursor = Math.max(0, CHARACTERS.findIndex(c => c.id === currentCharacterId));
   setState('chars');
 }
 function trySelectCharacter(){
   const c = CHARACTERS[charCursor];
-  if(c && c.isUnlocked()){ currentCharacterId = c.id; saveGame(); playSfx('select'); renderChars(); }
+  if(c && c.isUnlocked()){ currentCharacterId = c.id; saveGame(); playSfx('select'); renderChars(); if(onlineMode && onlinePresenceRef) onlinePresenceRef.update({ charId: currentCharacterId }).catch(() => {}); }
 }
-function goHome(){ playSfx('select'); initLevel(); setState('menu'); }
+function goHome(){ if(onlineMode) leaveOnlineRoom(); playSfx('select'); initLevel(); setState('menu'); }
 function tryShoot(){
   if(state !== 'playing' || player.shootCooldown > 0) return;
   const p = player, def = getCharacter(currentCharacterId);
@@ -807,16 +860,26 @@ function pollPad(){
 function onKeyPress(k){
   if(sfxCtx && sfxCtx.state === 'suspended') sfxCtx.resume().catch(()=>{});
   if(k === 'h' && state !== 'menu'){ goHome(); return; }
+  const guest = onlineMode && !isHost;
   switch(state){
     case 'menu':
-      if(k === ' ' || k === 'Enter') startNewGame(); else if(k === 'm') openMap(false); else if(k === 'c') openChars(false); break;
+      if(k === ' ' || k === 'Enter') startNewGame(); else if(k === 'm') openMap(false); else if(k === 'c') openChars(false); else if(k === 'o') openOnlinePanel(); break;
+    case 'online':
+      if(k === 'Escape') setState('menu'); break;
     case 'playing':
-      if(k === 'm' || k === 'Escape' || k === 'p') openMap(true); else if(k === 'c') openChars(true); break;
+      if(onlineMode && amIEliminated()){
+        if(k === 'ArrowLeft' || k === 'q' || k === 'a'){ cycleSpectateTarget(-1); return; }
+        if(k === 'ArrowRight' || k === 'd'){ cycleSpectateTarget(1); return; }
+      }
+      if(k === 'm' || k === 'Escape' || k === 'p'){ if(!guest) openMap(true); } else if(k === 'c') openChars(true); break;
     case 'clear':
+      if(guest) break;
       if(k === ' ' || k === 'Enter') advanceAfterLevelClear(); else if(k === 'r') retryCurrentLevel(); else if(k === 'm') openMap(false); break;
     case 'over':
+      if(guest) break;
       if(k === ' ' || k === 'Enter') respawnAtCheckpoint(); else if(k === 'm') openMap(false); break;
     case 'victory':
+      if(guest) break;
       if(k === ' ' || k === 'Enter') startNewGame(); else if(k === 'm') openMap(false); break;
     case 'map':
       if(k === 'ArrowLeft'){ mapCursorLevel = Math.max(0, mapCursorLevel - 1); playSfx('select'); renderMap(); }
@@ -824,18 +887,21 @@ function onKeyPress(k){
       else if(k === 'ArrowUp'){ mapCursorWorld = Math.max(0, mapCursorWorld - 1); playSfx('select'); renderMap(); }
       else if(k === 'ArrowDown'){ mapCursorWorld = Math.min(WORLD_THEMES.length - 1, mapCursorWorld + 1); playSfx('select'); renderMap(); }
       else if(k === ' ' || k === 'Enter') tryLaunchFromMap();
-      else if(k === 'm' || k === 'Escape') setState(mapReturnsToPlay ? 'playing' : 'menu');
+      else if(k === 'm' || k === 'Escape') setState(onlineMode ? overlayPrev : (mapReturnsToPlay ? 'playing' : 'menu'));
       break;
     case 'chars':
       if(k === 'ArrowLeft'){ charCursor = Math.max(0, charCursor - 1); playSfx('select'); renderChars(); }
       else if(k === 'ArrowRight'){ charCursor = Math.min(CHARACTERS.length - 1, charCursor + 1); playSfx('select'); renderChars(); }
       else if(k === ' ' || k === 'Enter') trySelectCharacter();
-      else if(k === 'c' || k === 'Escape') setState(charReturnsToPlay ? 'playing' : 'menu');
+      else if(k === 'c' || k === 'Escape') setState(onlineMode ? overlayPrev : (charReturnsToPlay ? 'playing' : 'menu'));
       break;
   }
 }
 const GAME_KEYS = [' ','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'];
 window.addEventListener('keydown', e => {
+  const tg = e.target;
+  if(tg && (tg.tagName === 'TEXTAREA' || (tg.tagName === 'INPUT' && tg.type === 'text'))) return;
+  if((e.key === 't' || e.key === 'T') && onlineMode && state !== 'online'){ e.preventDefault(); $('chatInput').focus(); return; }
   if(document.activeElement && document.activeElement.tagName === 'BUTTON') document.activeElement.blur();
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if(GAME_KEYS.includes(k)) e.preventDefault();
@@ -851,7 +917,7 @@ function bindTouch(id, name, key){
 }
 bindTouch('tbL','left'); bindTouch('tbR','right'); bindTouch('tbD','down'); bindTouch('tbJ','jump',' '); bindTouch('tbS','shoot');
 $('tbM').addEventListener('pointerdown', e => { e.preventDefault(); onKeyPress('m'); });
-if(('ontouchstart' in window) || navigator.maxTouchPoints > 0){ $('touch').classList.add('on'); $('tbM').style.display = 'block'; }
+if(('ontouchstart' in window) || navigator.maxTouchPoints > 0){ $('touch').classList.add('on'); $('tbM').style.display = 'block'; document.body.classList.add('touchdev'); }
 $('fsBtn').addEventListener('click', () => {
   if(!document.fullscreenElement) (document.documentElement.requestFullscreen || (()=>{})).call(document.documentElement);
   else document.exitFullscreen();
@@ -863,12 +929,12 @@ $('vol').addEventListener('change', saveGame);
 // ---------------------------------------------------------------------
 //  Interface (panneaux)
 // ---------------------------------------------------------------------
-const PANELS = { menu:'menu', map:'mapPanel', chars:'charPanel', clear:'clearPanel', over:'overPanel', victory:'victoryPanel' };
+const PANELS = { menu:'menu', online:'onlinePanel', map:'mapPanel', chars:'charPanel', clear:'clearPanel', over:'overPanel', victory:'victoryPanel' };
 function setState(s){
   state = s;
   Object.values(PANELS).forEach(id => $(id).classList.remove('on'));
   if(PANELS[s]) $(PANELS[s]).classList.add('on');
-  $('hud').style.display = (s === 'menu') ? 'none' : 'flex';
+  $('hud').style.display = (s === 'menu' || s === 'online') ? 'none' : 'flex';
   if(s === 'map') renderMap();
   if(s === 'chars') renderChars();
   if(s === 'clear'){
@@ -915,7 +981,7 @@ function renderChars(){
 let hudCache = {};
 function setText(id, txt){ if(hudCache[id] !== txt){ hudCache[id] = txt; $(id).textContent = txt; } }
 function updateHUD(){
-  if(state === 'menu') return;
+  if(state === 'menu' || state === 'online') return;
   const th = WORLD_THEMES[Math.min(worldIndex, 11)];
   setText('hearts', '❤️'.repeat(Math.max(0, lives)) || '💀');
   setText('scoreP', `⭐ ${score}`);
@@ -1303,7 +1369,7 @@ function makePlayerMesh(def){
   return { root, body, legL, legR, armL, armR, aura: null };
 }
 function ensurePlayerMesh(){
-  const def = getCharacter(currentCharacterId);
+  const def = onlineMode ? tintedDef(currentCharacterId, mySlot()) : getCharacter(currentCharacterId);
   if(playerMesh && playerMeshId === def) return;
   if(playerMesh) entGroup.remove(playerMesh.root);
   playerMesh = makePlayerMesh(def); playerMeshId = def;
@@ -1316,8 +1382,8 @@ function updatePlayerMesh(){
   ensurePlayerMesh();
   const p = player, pm = playerMesh, x = ipos(p.x, p.px), y = ipos(p.y, p.py);
   pm.root.position.set(wx(x + p.w/2), wy(y + p.h), 0);
-  const targetRot = (state === 'menu') ? frameTick * 0.025 : (p.facing > 0 ? Math.PI/2 : -Math.PI/2);
-  if(state === 'menu') pm.root.rotation.y = targetRot;
+  const targetRot = (state === 'menu' || state === 'online') ? frameTick * 0.025 : (p.facing > 0 ? Math.PI/2 : -Math.PI/2);
+  if(state === 'menu' || state === 'online') pm.root.rotation.y = targetRot;
   else { let d = targetRot - pm.root.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); pm.root.rotation.y += d * 0.35; }
   const sr = Math.min(Math.abs(p.vx)/MOVE_SPEED, 1);
   const sw = p.onGround ? Math.sin(frameTick*0.4)*0.75*sr : 0.4;
@@ -1488,7 +1554,8 @@ function updateProjMeshes(){
 let camLookY = 6;
 function render3D(){
   if(!level) return;
-  updatePlayerMesh(); updateEnemyMeshes(); updateProjMeshes(); renderParticles();
+  updatePlayerMesh(); if(onlineMode && amIEliminated() && playerMesh) playerMesh.root.visible = false;
+  updatePeerMeshes(); updateEnemyMeshes(); updateProjMeshes(); renderParticles();
   platMeshes.forEach(pm => { const r = pm.mp; pm.grp.position.set(wx(r.x - r.dx*(1-renderAlpha) + r.w/2), wy(r.y - r.dy*(1-renderAlpha) + r.h/2), 0); });
   coinMeshes.forEach((g, i) => {
     const c = level.coins[i]; g.visible = !c.taken; if(c.taken) return;
@@ -1498,8 +1565,10 @@ function render3D(){
   if(barrierMesh){ barrierMesh.visible = enemies.some(e => e.isBoss && e.alive); barrierMesh.material.opacity = 0.18 + 0.12*Math.sin(frameTick*0.08); }
 
   let cx, cy, tx, ty, tz = 0;
-  const p = player, pxw = wx(ipos(p.x, p.px) + p.w/2), pyw = wy(ipos(p.y, p.py) + p.h/2);
-  if(state === 'menu'){
+  const p = player; let pxw = wx(ipos(p.x, p.px) + p.w/2), pyw = wy(ipos(p.y, p.py) + p.h/2);
+  const spec = (onlineMode && state !== 'menu') ? spectateSubject() : null;
+  if(spec){ pxw = wx(spec.x + PLAYER_WIDTH/2); pyw = wy(spec.y + spec.h/2); }
+  if(state === 'menu' || state === 'online'){
     const a = frameTick*0.006 + 0.6;
     cx = pxw + Math.sin(a)*6.5; cy = pyw + 1.6; const cz = Math.cos(a)*6.5;
     camera.position.set(cx, cy, cz); camera.lookAt(pxw, pyw + 0.2, 0);
@@ -1515,6 +1584,7 @@ function render3D(){
     if(sunMesh) sunMesh.position.x = centerX + 22;
   }
   sunLight.target.updateMatrixWorld();
+  updateNameTags();
   renderer.render(scene, camera);
 }
 
@@ -1588,8 +1658,12 @@ function stepGame(){
   if(screenShakeTimer > 0){ screenShakeTimer--; if(screenShakeTimer <= 0) screenShakeMag = 0; }
   if(damageFlashTimer > 0) damageFlashTimer--;
   if(comboTimer > 0){ comboTimer--; if(comboTimer <= 0) comboCount = 0; }
-  if(state === 'playing'){ stepPlaying(); if(frameTick % 180 === 0) saveGame(); }
+  if(onlineMode){
+    try { if(isHost) updateOnlineHost(); else updateOnlineGuest(); }
+    catch(err){ console.error('updateOnline (ignoré, boucle poursuivie) :', err); }
+  } else if(state === 'playing'){ stepPlaying(); if(frameTick % 180 === 0) saveGame(); }
   updateMusic(); updateParticles(); updateHUD();
+  if(onlineMode) updateNetHUD();
 }
 let lastLoop = 0, accum = 0;
 function gameLoop(now){
@@ -1610,6 +1684,762 @@ function gameLoop(now){
   } catch(err){ console.error('gameLoop :', err); }
   finally { requestAnimationFrame(gameLoop); }
 }
+
+// =====================================================================
+//  MODE EN LIGNE (jusqu'à 4 joueurs) — porté de la version 2D (Firebase Realtime Database)
+//  - Chaque joueur simule SON personnage localement à 60 Hz (zéro latence) et publie son état
+//    ~30 fois/s dans rooms/<code>/pstate/<id> ; les autres l'affichent par interpolation.
+//  - L'hôte est l'arbitre du monde partagé (ennemis, boss, tirs, score, vies, pièces, fin de niveau)
+//    et le diffuse dans rooms/<code>/state. Les invités lui envoient des ÉVÉNEMENTS
+//    (coup encaissé, ennemi écrasé, pièce, tir) dans rooms/<code>/events.
+//  - Les niveaux sont générés de façon déterministe : seul (monde, niveau, heure de départ) circule.
+// =====================================================================
+const NET_SEND_EVERY = 2;       // pas de simulation entre deux envois (2 => 30 envois/s)
+const INTERP_DELAY = 110;       // retard d'affichage des éléments distants (ms)
+const NOCTL = { left:false, right:false, down:false, jump:false, shoot:false };
+const ONLINE_TINTS = [null, { accent:'#22c55e', accentLight:'#8be6a8' }, { accent:'#f59e0b', accentLight:'#fde68a' }, { accent:'#a855f7', accentLight:'#e9d5ff' }];
+const tintCache = new WeakMap();
+function tintedDef(id, slot){
+  const base = getCharacter(id), tint = ONLINE_TINTS[(slot || 0) % ONLINE_TINTS.length];
+  if(!tint || base.custom) return base;
+  let m = tintCache.get(base); if(!m){ m = {}; tintCache.set(base, m); }
+  return m[slot] || (m[slot] = Object.assign({}, base, { palette: Object.assign({}, base.palette, tint) }));
+}
+
+let serverOffset = 0, fbApp = null, fbDB = null, fbConnected = null, lastPingMs = null;
+try {
+  fbApp = firebase.initializeApp({
+    apiKey: "AIzaSyBa9NT0-DVH1HhjEH8GZW9KJ5vvrTO58qQ",
+    authDomain: "zkr-game.firebaseapp.com",
+    databaseURL: "https://zkr-game-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "zkr-game",
+    storageBucket: "zkr-game.firebasestorage.app",
+    messagingSenderId: "136791783166",
+    appId: "1:136791783166:web:4cd9de3bc2b880e28917af"
+  });
+  fbDB = firebase.database();
+  fbDB.ref('.info/connected').on('value', snap => { fbConnected = snap.val(); });
+  fbDB.ref('.info/serverTimeOffset').on('value', snap => { serverOffset = Number(snap.val()) || 0; });
+} catch(e){ console.warn('Firebase indisponible :', e); }
+
+let playerName = 'Joueur' + Math.floor(1000 + Math.random() * 9000);
+let onlineMode = false, isHost = false, roomCode = null;
+const myId = 'p_' + Math.random().toString(36).slice(2, 9);
+let onlinePlayerLives = {}, onlineAck = {}, onlineMeta = {};
+let onlineRoomRef = null, onlineStateRef = null, onlinePlayersRef = null, onlinePresenceRef = null, onlineChatRef = null;
+let onlinePStateAllRef = null, onlinePStateRef = null, onlineEventsRef = null;
+let remoteSnapshot = null, snapTL = null, peerTL = {}, peerLatest = {};
+let myShots = [], hurtSeq = 0, lastGuestLives = null, lastNetState = null;
+let onlineWorld = -1, onlineLevel = -1, onlineLs = 0, onlineLevelStartT = 0, onlinePlatTick = 0;
+let localKilled = {}, stompSentAt = {};
+let lastBroadcastState = null, lastPstateSendTick = -999, lastOnlineBroadcastTick = -999;
+let spectateTargetId = null, pingRequestSeq = 0;
+const netProjCache = new Map();
+
+const rnd1 = v => Math.round(v * 10) / 10;
+const nlerp = (a, b, k) => a + (b - a) * k;
+function serverNow(){ return Math.round(Date.now() + serverOffset); }
+function mySlot(){ return (onlineMeta[myId] && onlineMeta[myId].slot) || 0; }
+function mySpawn(){ return { x: level.startX + mySlot() * 40, y: level.startY }; }
+const simState = () => (state === 'map' || state === 'chars') ? overlayPrev : state;
+function setSimState(s){ if(state === 'map' || state === 'chars') overlayPrev = s; else setState(s); }
+function resetOnlineLives(){ if(onlineMode && isHost) Object.keys(onlineMeta).forEach(id => { onlinePlayerLives[id] = MAX_LIVES; }); }
+function resetOnlineSession(){
+  onlineAck = {}; onlinePlayerLives = {}; peerTL = {}; peerLatest = {}; snapTL = null; remoteSnapshot = null;
+  myShots = []; hurtSeq = 0; lastGuestLives = null; lastNetState = null; localKilled = {}; stompSentAt = {};
+  spectateTargetId = null; lastBroadcastState = null; lastPstateSendTick = -999;
+  onlineWorld = -1; onlineLevel = -1; onlineLs = 0; netProjCache.clear(); projectiles = [];
+}
+
+// ---------- Spectateur (joueur éliminé) ----------
+function amIEliminated(){
+  if(!onlineMode) return false;
+  if(isHost) return (onlinePlayerLives[myId] ?? MAX_LIVES) <= 0;
+  return lives <= 0;
+}
+function getRoomMemberLives(id){
+  if(isHost) return onlinePlayerLives[id] ?? MAX_LIVES;
+  return (remoteSnapshot && remoteSnapshot.lives && remoteSnapshot.lives[id] != null) ? remoteSnapshot.lives[id] : MAX_LIVES;
+}
+function getSpectateCandidateIds(){
+  return Object.keys(onlineMeta).filter(id => id !== myId).sort((a, b) => ((onlineMeta[a] && onlineMeta[a].slot) || 0) - ((onlineMeta[b] && onlineMeta[b].slot) || 0));
+}
+function ensureSpectateTarget(){
+  const c = getSpectateCandidateIds();
+  if(!c.length){ spectateTargetId = null; return; }
+  if(!spectateTargetId || !c.includes(spectateTargetId)){
+    const alive = c.filter(id => getRoomMemberLives(id) > 0);
+    spectateTargetId = alive[0] || c[0];
+  }
+}
+function cycleSpectateTarget(dir){
+  const c = getSpectateCandidateIds();
+  if(!c.length) return;
+  if(!spectateTargetId){ spectateTargetId = c[0]; return; }
+  let i = c.indexOf(spectateTargetId); if(i === -1) i = 0;
+  spectateTargetId = c[(i + dir + c.length) % c.length];
+}
+function spectateSubject(){
+  if(!amIEliminated()) return null;
+  ensureSpectateTarget();
+  const rs = spectateTargetId ? peerRenderState(spectateTargetId) : null;
+  return rs ? { x: rs.x, y: rs.y, h: rs.crouch ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT } : null;
+}
+
+// ---------- Utilitaires UI ----------
+function randomRoomCode(){
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let c = '';
+  for(let i = 0; i < 5; i++) c += chars[Math.floor(Math.random() * chars.length)];
+  return c;
+}
+function onlineSetStatus(msg){ const el = $('onlineStatus'); if(el) el.textContent = msg; }
+function netBanner(txt){ const b = $('netBanner'); if(!txt){ b.style.display = 'none'; return; } b.textContent = txt; b.style.display = 'block'; }
+function setOnlineUI(on){
+  document.body.classList.toggle('guestMode', on && !isHost);
+  $('chatPanel').classList.toggle('active', on);
+  $('hudHint').textContent = on ? (isHost ? 'M : carte · C : perso · T : chat · H : quitter' : 'C : perso · T : chat · H : quitter') : 'M : carte · C : personnage · H : accueil';
+  if(!on){ $('netPill').style.display = 'none'; $('specBar').style.display = 'none'; netBanner(''); $('chatMessages').textContent = ''; }
+}
+function openOnlinePanel(){
+  $('nameInput').value = playerName;
+  onlineSetStatus(fbDB ? 'Non connecté.' : 'Firebase indisponible (vérifie ta connexion).');
+  setState('online');
+}
+function updateNetHUD(){
+  if(state === 'menu' || state === 'online') return;
+  const n = Math.max(1, Object.keys(onlineMeta).length);
+  const ping = lastPingMs == null ? '…' : (lastPingMs < 0 ? 'erreur' : lastPingMs + ' ms');
+  setText('netPill', `🌐 ${roomCode} · ${n} 👥 · ${ping}${fbConnected === false ? ' ⚠️' : ''}`);
+  $('netPill').style.display = '';
+  const sb = $('specBar');
+  if(amIEliminated() && simState() === 'playing'){
+    const nm = (spectateTargetId && onlineMeta[spectateTargetId] && onlineMeta[spectateTargetId].name) || '…';
+    setText('specBar', `👁 SPECTATEUR — ${nm}  (← → pour changer)`); sb.style.display = 'block';
+  } else sb.style.display = 'none';
+}
+
+// ---------- Ping ----------
+function measureFirebasePing(){
+  if(!onlineRoomRef) return;
+  const mySeq = ++pingRequestSeq, t0 = performance.now();
+  onlineRoomRef.child('diag/' + myId).set(firebase.database.ServerValue.TIMESTAMP)
+    .then(() => { if(mySeq === pingRequestSeq) lastPingMs = Math.round(performance.now() - t0); })
+    .catch(() => { if(mySeq === pingRequestSeq) lastPingMs = -1; });
+}
+setInterval(() => { if(onlineMode) measureFirebasePing(); }, 2000);
+
+// ---------- Chat ----------
+function appendChatMessage(msg){
+  if(!msg || !msg.text) return;
+  const box = $('chatMessages'), div = document.createElement('div');
+  div.className = 'chatMsg ' + (msg.id === myId ? 'self' : 'other');
+  const nm = document.createElement('span'); nm.className = 'chatName'; nm.textContent = (msg.name || 'Joueur') + ' :';
+  div.appendChild(nm); div.appendChild(document.createTextNode(String(msg.text)));
+  box.appendChild(div);
+  while(box.children.length > 60) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+}
+function setupChatForRoom(){
+  $('chatMessages').textContent = '';
+  if(onlineChatRef) onlineChatRef.off();
+  onlineChatRef = onlineRoomRef.child('chat');
+  onlineChatRef.limitToLast(60).on('child_added', snap => appendChatMessage(snap.val()));
+}
+function sendChatMessage(){
+  const inp = $('chatInput'), text = inp.value.trim().slice(0, 150);
+  inp.value = '';
+  if(!text || !onlineChatRef) return;
+  onlineChatRef.push({ id: myId, name: playerName, text, ts: firebase.database.ServerValue.TIMESTAMP }).catch(() => {});
+}
+$('chatSendBtn').addEventListener('click', () => { sendChatMessage(); $('chatInput').blur(); });
+$('chatInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ sendChatMessage(); e.target.blur(); }
+  else if(e.key === 'Escape'){ e.target.blur(); }
+});
+
+// ---------- Salon : création / connexion / sortie ----------
+function readPlayersMeta(val){
+  val = val || {};
+  const ids = Object.keys(val).sort((a, b) => (val[a].joinedAt || 0) - (val[b].joinedAt || 0)).slice(0, 4);
+  const m = {};
+  ids.forEach((id, i) => { m[id] = { charId: val[id].charId || 'zkr', slot: i, name: (val[id].name && String(val[id].name).slice(0, 14)) || 'Joueur' }; });
+  return m;
+}
+function cleanupOnlineRefs(){
+  if(onlineStateRef) onlineStateRef.off();
+  if(onlinePlayersRef) onlinePlayersRef.off();
+  if(onlinePStateAllRef) onlinePStateAllRef.off();
+  if(onlineEventsRef) onlineEventsRef.off();
+  if(onlineChatRef) onlineChatRef.off();
+  if(onlinePStateRef){ onlinePStateRef.onDisconnect().cancel(); onlinePStateRef.remove().catch(() => {}); }
+  if(onlinePresenceRef){ onlinePresenceRef.onDisconnect().cancel(); onlinePresenceRef.remove().catch(() => {}); }
+  onlineRoomRef = onlineStateRef = onlinePlayersRef = onlinePresenceRef = onlinePStateRef = onlinePStateAllRef = onlineEventsRef = onlineChatRef = null;
+}
+function leaveOnlineRoom(){
+  cleanupOnlineRefs();
+  onlineMode = false; isHost = false; roomCode = null; onlineMeta = {};
+  resetOnlineSession();
+  setOnlineUI(false);
+  onlineSetStatus('Non connecté.');
+  peerMeshes.forEach((e, id) => disposePeerMesh(e)); peerMeshes.clear();
+  tagEls.forEach(el => el.remove()); tagEls.clear();
+}
+function createOnlineRoom(){
+  if(!fbDB){ onlineSetStatus('Connexion à Firebase indisponible (vérifie ta connexion).'); return; }
+  roomCode = randomRoomCode(); isHost = true; onlineMode = true;
+  resetOnlineSession();
+  onlineRoomRef = fbDB.ref('rooms/' + roomCode);
+  onlineStateRef = onlineRoomRef.child('state');
+  onlinePlayersRef = onlineRoomRef.child('players');
+  onlinePresenceRef = onlinePlayersRef.child(myId);
+  onlinePStateAllRef = onlineRoomRef.child('pstate');
+  onlinePStateRef = onlinePStateAllRef.child(myId);
+  onlineEventsRef = onlineRoomRef.child('events');
+  onlineRoomRef.child('meta').set({ hostId: myId, createdAt: Date.now() });
+  onlinePresenceRef.set({ charId: currentCharacterId, slot: 0, joinedAt: Date.now(), name: playerName });
+  onlinePresenceRef.onDisconnect().remove();
+  onlinePStateRef.onDisconnect().remove();
+  onlineMeta = { [myId]: { charId: currentCharacterId, slot: 0, name: playerName } };
+  onlinePlayersRef.on('value', snap => {
+    const m = readPlayersMeta(snap.val());
+    onlineMeta = m;
+    Object.keys(onlinePlayerLives).forEach(id => { if(!m[id]){ delete onlinePlayerLives[id]; delete onlineAck[id]; } });
+    onlineSetStatus(`Salon ${roomCode} — ${Object.keys(m).length}/4 joueur(s). Partage ce code !`);
+  });
+  onlinePStateAllRef.on('value', snap => onPeerStates(snap.val()));
+  onlineEventsRef.on('child_added', snap => {
+    const ev = snap.val();
+    snap.ref.remove().catch(() => {});
+    try { handleNetEvent(ev); } catch(err){ console.warn('Événement réseau ignoré :', err); }
+  });
+  setupChatForRoom();
+  setOnlineUI(true);
+  worldIndex = 0; levelIndex = 0; lives = MAX_LIVES; score = 0; livesLostThisWorld = 0;
+  onlinePlayerLives[myId] = MAX_LIVES;
+  initLevel(); setState('playing');
+}
+function joinOnlineRoom(code){
+  if(!fbDB){ onlineSetStatus('Connexion à Firebase indisponible (vérifie ta connexion).'); return; }
+  code = (code || '').toUpperCase().trim();
+  if(!code){ onlineSetStatus('Entre un code de salon.'); return; }
+  onlineSetStatus(`Connexion au salon ${code}...`);
+  resetOnlineSession();
+  const roomRef = fbDB.ref('rooms/' + code), playersRef = roomRef.child('players'), stateRef = roomRef.child('state'), presenceRef = playersRef.child(myId);
+  let joined = false;
+  playersRef.on('value', s2 => { if(joined) onlineMeta = readPlayersMeta(s2.val()); });
+  stateRef.on('value', s2 => pushSnapshot(s2.val()));
+  roomRef.child('meta').once('value').then(snap => {
+    if(!snap.exists()){ playersRef.off(); stateRef.off(); onlineSetStatus(`Aucun salon "${code}" trouvé.`); return; }
+    joined = true; roomCode = code; isHost = false; onlineMode = true;
+    onlineRoomRef = roomRef; onlineStateRef = stateRef; onlinePlayersRef = playersRef; onlinePresenceRef = presenceRef;
+    onlinePStateAllRef = roomRef.child('pstate'); onlinePStateRef = onlinePStateAllRef.child(myId); onlineEventsRef = roomRef.child('events');
+    presenceRef.set({ charId: currentCharacterId, slot: 99, joinedAt: Date.now(), name: playerName });
+    presenceRef.onDisconnect().remove();
+    onlinePStateRef.onDisconnect().remove();
+    onlinePStateAllRef.on('value', s => onPeerStates(s.val()));
+    playersRef.once('value').then(s2 => { onlineMeta = readPlayersMeta(s2.val()); }).catch(() => {});
+    setupChatForRoom();
+    setOnlineUI(true);
+    netBanner("Connecté au salon " + code + ". En attente de l'hôte…");
+    setState('playing');
+  }).catch(() => { playersRef.off(); stateRef.off(); onlineSetStatus('Erreur de connexion à Firebase.'); });
+}
+// (invité) régénère le niveau de l'hôte (déterministe) quand l'instance de niveau change
+function ensureOnlineLevel(snap){
+  const w = snap.world, l = snap.level, ls = snap.ls || 0;
+  if(w === onlineWorld && l === onlineLevel && ls === onlineLs && level) return;
+  onlineWorld = w; onlineLevel = l; onlineLs = ls; onlineLevelStartT = ls;
+  worldIndex = w; levelIndex = l;
+  level = generateLevel(w, l);
+  enemies = level.enemyData.map(e => new Enemy(e.x, e.y, e.left, e.right, e.speed, { ...e, kind: e.isBoss ? BOSS_KINDS[w] : ENEMY_KINDS[w] }));
+  projectiles = []; myShots = []; netProjCache.clear(); clearParticles();
+  localKilled = {}; stompSentAt = {};
+  onlinePlatTick = Math.max(0, (serverNow() - ls) / STEP_MS);
+  const sp = mySpawn(); player.reset(sp.x, sp.y);
+  cameraX = 0; prevCam = 0; livesLostThisLevel = 0;
+  buildScene3D(); triggerFade();
+}
+
+// ---------- Historiques horodatés (interpolation de capture) ----------
+function newTimeline(clock){ return { off: null, buf: [], clock: clock || Date.now }; }
+function tlPush(tl, s){
+  const cand = tl.clock() - s.t;
+  tl.off = (tl.off == null) ? cand : Math.min(tl.off + 0.4, cand);
+  const buf = tl.buf, last = buf[buf.length - 1];
+  if(last && s.t <= last.t) return false;
+  buf.push(s); if(buf.length > 24) buf.shift();
+  return true;
+}
+function tlShowTime(tl){ return tl.clock() - tl.off - INTERP_DELAY; }
+function tlBracket(tl, st){
+  const buf = tl.buf, n = buf.length;
+  if(!n) return null;
+  if(st <= buf[0].t) return { a: buf[0], b: buf[0], k: 0, over: 0 };
+  const last = buf[n - 1];
+  if(st >= last.t) return { a: last, b: last, k: 0, over: st - last.t };
+  for(let i = n - 1; i > 0; i--){
+    const a = buf[i - 1], b = buf[i];
+    if(st >= a.t) return { a, b, k: (st - a.t) / Math.max(1, b.t - a.t), over: 0 };
+  }
+  return { a: buf[0], b: buf[0], k: 0, over: 0 };
+}
+function pushSnapshot(v){
+  if(!v || typeof v.t !== 'number') return;
+  if(!snapTL) snapTL = newTimeline(serverNow);
+  if(tlPush(snapTL, v)) remoteSnapshot = v;
+}
+function onPeerStates(val){
+  if(!onlineMode) return;
+  val = val || {};
+  Object.keys(val).forEach(id => {
+    if(id === myId) return;
+    const s = val[id];
+    if(!s || typeof s.t !== 'number' || typeof s.x !== 'number') return;
+    let tl = peerTL[id]; if(!tl) tl = peerTL[id] = newTimeline(Date.now);
+    const last = tl.buf[tl.buf.length - 1];
+    if(last){
+      if(last.ls !== s.ls) tl.buf.length = 0;
+      else if(Math.abs(s.x - last.x) > 300 || Math.abs(s.y - last.y) > 300) s.j = 1;
+    }
+    if(tlPush(tl, s)) peerLatest[id] = s;
+  });
+  Object.keys(peerTL).forEach(id => { if(!val[id]){ delete peerTL[id]; delete peerLatest[id]; } });
+}
+function peerRenderState(id){
+  const tl = peerTL[id];
+  if(!tl || !tl.buf.length) return null;
+  const br = tlBracket(tl, tlShowTime(tl));
+  if(!br) return null;
+  const a = br.a, b = br.b, k = br.k;
+  const pl = (level && a.m >= 0 && a.m === b.m && level.movingPlatforms[a.m]) ? level.movingPlatforms[a.m] : null;
+  let x, y, src;
+  if(a === b){
+    src = a;
+    if(pl){ x = pl.x + a.mx; y = pl.y + a.my; } else { x = a.x + (a.vx || 0) * Math.min(br.over || 0, 50) / STEP_MS; y = a.y; }
+  } else if(b.j){ src = a; x = a.x; y = a.y; }
+  else {
+    src = (k < 0.5) ? a : b;
+    if(pl){ x = pl.x + nlerp(a.mx, b.mx, k); y = pl.y + nlerp(a.my, b.my, k); } else { x = nlerp(a.x, b.x, k); y = nlerp(a.y, b.y, k); }
+  }
+  const pw = src.pw || 0;
+  return { x, y, vx: nlerp(a.vx || 0, b.vx || 0, k), facing: src.f || 1, onGround: !!src.g, crouch: !!src.c, inv: !!src.i, slide: !!src.sl, pw: pw === 1 ? 'star' : (pw === 2 ? 'speed' : null) };
+}
+
+// ---------- Événements invité -> hôte ----------
+function pushEvent(ev){
+  if(!onlineEventsRef) return;
+  ev.id = myId; ev.ls = onlineLevelStartT;
+  if(ev.t == null) ev.t = serverNow();
+  onlineEventsRef.push(ev).catch(() => {});
+}
+function hostApplyHurt(id, q){
+  if(q != null){ if(q <= (onlineAck[id] || 0)) return; onlineAck[id] = q; }
+  if(simState() !== 'playing') return;
+  if(onlinePlayerLives[id] == null) onlinePlayerLives[id] = MAX_LIVES;
+  if(onlinePlayerLives[id] <= 0) return;
+  livesLostThisLevel++; livesLostThisWorld++;
+  onlinePlayerLives[id]--;
+  if(onlinePlayerLives[id] < 0) onlinePlayerLives[id] = 0;
+  const ids = Object.keys(onlineMeta);
+  if(ids.length > 0 && ids.every(pid => (onlinePlayerLives[pid] ?? MAX_LIVES) <= 0)){ setSimState('over'); saveGame(); }
+}
+function damagePlayerOnline(id){
+  if(simState() !== 'playing') return;
+  if((onlinePlayerLives[id] ?? MAX_LIVES) <= 0) return;
+  hostApplyHurt(id, null);
+  if(id === myId && (onlinePlayerLives[id] ?? 0) > 0){ const s = mySpawn(); player.reset(s.x, s.y); }
+}
+function grantLifeRegenTick(){
+  if(!isHost) return;
+  Object.keys(onlineMeta).forEach(id => {
+    const cur = onlinePlayerLives[id] ?? MAX_LIVES;
+    if(cur >= MAX_LIVES) return;
+    const wasOut = cur <= 0;
+    onlinePlayerLives[id] = cur + 1;
+    if(wasOut && id === myId && level){ const sp = mySpawn(); player.reset(sp.x, sp.y); }
+  });
+}
+function spawnHostShot(owner, x, y, dir, color, t0){
+  if(!level) return;
+  const pr = new Projectile(x, y, dir, color, false);
+  pr.owner = owner; pr.t0 = t0;
+  const age = Math.max(0, Math.min(25, Math.round((serverNow() - t0) / STEP_MS)));
+  for(let i = 0; i < age && !pr.dead; i++) pr.update(level.solids);
+  if(!pr.dead) projectiles.push(pr);
+}
+function handleNetEvent(ev){
+  if(!ev || !isHost || !onlineMode || !level) return;
+  if(ev.k === 'hu'){ hostApplyHurt(ev.id, ev.q); return; }
+  if(simState() !== 'playing' || ev.ls !== onlineLevelStartT) return;
+  if(ev.k === 'sh') spawnHostShot(ev.id, ev.x, ev.y, ev.d, ev.c, ev.t);
+  else if(ev.k === 'st'){
+    const e = enemies[ev.e];
+    if(e && e.alive){ if(ev.s) e.hp = 1; resolveEnemyHit(e, '#ffcf5f', '#ffcf5f'); }
+  } else if(ev.k === 'cn'){
+    const c = level.coins[ev.i];
+    if(c && !c.taken) applyCoinPickup(c, { powerupType: null, powerupTimer: 0 }, true);
+  }
+}
+
+// ---------- Mon personnage (hôte ET invité) ----------
+function fireOnlineShot(){
+  const p = player;
+  if(p.shootCooldown > 0) return;
+  const charDef = tintedDef(currentCharacterId, mySlot());
+  const dir = p.facing, ox = dir > 0 ? p.x + p.w : p.x - 16, oy = p.y + p.h * 0.42, color = charDef.palette.accentLight;
+  p.shootCooldown = SHOOT_COOLDOWN; playSfx('shoot');
+  const t0 = serverNow();
+  if(isHost) spawnHostShot(myId, ox, oy, dir, color, t0);
+  else {
+    const pr = new Projectile(ox, oy, dir, color, false); pr.owner = myId; myShots.push(pr);
+    pushEvent({ k: 'sh', x: rnd1(ox), y: rnd1(oy), d: dir, c: color, t: t0 });
+  }
+}
+function hurtMe(){
+  const p = player;
+  triggerShake(6, 14); damageFlashTimer = 16;
+  spawnParticles(p.x + p.w/2, p.y + p.h/2, 10, '#ff4a4a', { spd:2.6, spdVar:2.2, life:20, size:3 });
+  playSfx('hit');
+  if(isHost) damagePlayerOnline(myId);
+  else {
+    hurtSeq++; lives = Math.max(0, lives - 1); lastGuestLives = lives;
+    pushEvent({ k: 'hu', q: hurtSeq });
+    if(lives > 0){ const s = mySpawn(); p.reset(s.x, s.y); }
+  }
+}
+function onlineLocalStep(){
+  const p = player;
+  if(!level || simState() !== 'playing') return;
+  const myLives = isHost ? (onlinePlayerLives[myId] ?? MAX_LIVES) : lives;
+  if(myLives <= 0) return;
+  const ctl = state === 'playing' ? controls() : NOCTL;
+  p.update(ctl, level.solids);
+  if(ctl.shoot) fireOnlineShot();
+  if(p.y > DEATH_Y && !isInSpawnZone(p)){ hurtMe(); return; }
+  const bossAlive = enemies.some(e => e.isBoss && e.alive);
+  if(level.bossBarrierX != null && bossAlive && p.x + p.w > level.bossBarrierX){ p.x = level.bossBarrierX - p.w; if(p.vx > 0) p.vx = 0; }
+  for(let i = 0; i < level.coins.length; i++){
+    const c = level.coins[i];
+    if(c.taken) continue;
+    if(Math.hypot(p.x + p.w/2 - c.x, p.y + p.h/2 - c.y) < 35){
+      applyCoinPickup(c, p); playSfx('coin');
+      if(!isHost) pushEvent({ k: 'cn', i });
+    }
+  }
+  for(let i = 0; i < enemies.length; i++){
+    const e = enemies[i];
+    if(!e.alive || !rectsOverlap(p.rect, e.rect)) continue;
+    const star = p.powerupType === 'star';
+    if((p.vy > 0 && p.y + p.h - p.vy <= e.y + 15) || star){
+      if(p.vy > 0) p.vy = -10;
+      triggerShake(e.isBoss ? 9 : 3, e.isBoss ? 16 : 8);
+      if(isHost){
+        if(star) e.hp = 1;
+        resolveEnemyHit(e, '#ffcf5f', '#ffcf5f'); playSfx(e.isBoss ? 'boss' : 'stomp');
+      } else if(frameTick - (stompSentAt[i] || -99) > 12){
+        stompSentAt[i] = frameTick;
+        pushEvent({ k: 'st', e: i, s: star ? 1 : 0 });
+        playSfx(e.isBoss ? 'boss' : 'stomp');
+        spawnParticles(e.x + e.w/2, e.y + e.h/2, e.isBoss ? 14 : 7, e.isBoss ? '#ff6a3c' : '#ffcf5f', { spd:2.4, spdVar:2, life:18, size:2.8 });
+        if(!e.isBoss && (e.maxHp <= 1 || star)){ e.alive = false; localKilled[i] = frameTick; }
+      }
+    } else if(p.invincibleTimer <= 0 && !star && !isInSpawnZone(p)){ hurtMe(); return; }
+  }
+  for(const pr of projectiles){
+    if(pr.hostile && !pr.dead && rectsOverlap(p.rect, pr.rect)){
+      pr.dead = true;
+      if(p.invincibleTimer <= 0 && !isInSpawnZone(p) && p.powerupType !== 'star'){ hurtMe(); return; }
+    }
+  }
+  for(const s of level.spikes){
+    if(rectsOverlap(p.rect, s) && p.invincibleTimer <= 0 && !isInSpawnZone(p) && p.powerupType !== 'star'){ hurtMe(); return; }
+  }
+}
+function updateOnlinePlatforms(){
+  if(!level) return;
+  onlinePlatTick += 1;
+  const diff = (serverNow() - onlineLevelStartT) / STEP_MS - onlinePlatTick;
+  if(Math.abs(diff) > 40) onlinePlatTick += diff; else onlinePlatTick += diff * 0.03;
+  level.movingPlatforms.forEach(mp => mp.update(onlinePlatTick));
+}
+// (invité) ennemis et tirs de l'hôte, interpolés dans le passé proche
+function applyNetWorldView(){
+  if(!snapTL || !snapTL.buf.length || !level) return;
+  const st = tlShowTime(snapTL), br = tlBracket(snapTL, st);
+  if(!br) return;
+  const a = br.a, b = br.b, k = br.k, ea = a.e || [], eb = b.e || [];
+  for(let i = 0; i < enemies.length; i++){
+    const e = enemies[i], sb = eb[i];
+    if(!sb) continue;
+    const sa = ea[i] || sb, src = (k < 0.5) ? sa : sb;
+    let x, y;
+    if(sa[3] === 1 && sb[3] === 1 && Math.abs(sb[0] - sa[0]) < 250 && Math.abs(sb[1] - sa[1]) < 250){ x = nlerp(sa[0], sb[0], k); y = nlerp(sa[1], sb[1], k); }
+    else { x = src[0]; y = src[1]; }
+    const snapAlive = src[3] === 1;
+    if(localKilled[i] && (!snapAlive || frameTick - localKilled[i] > 120)) delete localKilled[i];
+    if(e.hitFlash > 0) e.hitFlash--;
+    if(snapAlive && src[4] < e.hp) e.hitFlash = 10;
+    const wasAlive = e.alive;
+    e.x = x; e.y = y; e.dir = src[2];
+    e.alive = snapAlive && !localKilled[i];
+    if(wasAlive && !e.alive && !localKilled[i]) spawnParticles(e.x + e.w/2, e.y + e.h/2, e.isBoss ? 14 : 7, e.isBoss ? '#ff6a3c' : '#ffcf5f', { spd:2.4, spdVar:2, life:18, size:2.8 });
+    e.hp = src[4]; e.maxHp = src[5];
+    e.attackState = src[6] ? 'telegraph' : 'patrol';
+    e.attackKind = src[6] === 1 ? 'dash' : 'shoot';
+  }
+  const list = (remoteSnapshot && remoteSnapshot.pr) || [], nets = [], seen = new Set();
+  for(const d of list){
+    if(!d || d.o === myId) continue;
+    const elapsed = (st - d.t) / STEP_MS;
+    if(elapsed < 0 || elapsed > PROJECTILE_LIFE) continue;
+    const key = d.o + '|' + d.t + '|' + d.y + '|' + d.h;
+    let pr = netProjCache.get(key);
+    if(!pr){ pr = new Projectile(0, d.y, d.d, d.c, d.h === 1); netProjCache.set(key, pr); }
+    pr.x = d.x + d.d * PROJECTILE_SPEED * elapsed; pr.y = d.y;
+    let blocked = false;
+    for(const s of level.solids){ if(rectsOverlap(pr.rect, s)){ blocked = true; break; } }
+    if(blocked) continue;
+    seen.add(key); nets.push(pr);
+  }
+  netProjCache.forEach((v, key) => { if(!seen.has(key)) netProjCache.delete(key); });
+  myShots.forEach(pr => {
+    if(pr.dead) return;
+    pr.update(level.solids);
+    for(const e of enemies){ if(e.alive && rectsOverlap(pr.rect, e.rect)){ pr.dead = true; break; } }
+  });
+  myShots = myShots.filter(pr => !pr.dead);
+  projectiles = myShots.concat(nets);
+}
+function updateOnlineCamera(){
+  if(!level) return;
+  const p = player;
+  let target = p.x + p.facing * Math.min(Math.abs(p.vx), MOVE_SPEED) * 9;
+  if(amIEliminated()){
+    ensureSpectateTarget();
+    const rs = spectateTargetId ? peerRenderState(spectateTargetId) : null;
+    if(rs) target = rs.x + rs.facing * Math.min(Math.abs(rs.vx), MOVE_SPEED) * 9;
+  } else spectateTargetId = null;
+  cameraX += ((target - WIDTH/3) - cameraX) * 0.1;
+  cameraX = Math.max(0, Math.min(cameraX, level.width - WIDTH));
+}
+function sendMyState(){
+  const p = player;
+  if(!onlinePStateRef || !level) return;
+  if(frameTick - lastPstateSendTick < NET_SEND_EVERY) return;
+  lastPstateSendTick = frameTick;
+  let m = -1, mx = 0, my = 0;
+  if(p.ridingPlatform){
+    const idx = level.movingPlatforms.indexOf(p.ridingPlatform);
+    if(idx >= 0){ m = idx; mx = rnd1(p.x - p.ridingPlatform.x); my = rnd1(p.y - p.ridingPlatform.y); }
+  }
+  onlinePStateRef.set({
+    x: rnd1(p.x), y: rnd1(p.y), vx: rnd1(p.vx), f: p.facing, g: p.onGround ? 1 : 0,
+    c: p.h === PLAYER_CROUCH_HEIGHT ? 1 : 0, i: p.invincibleTimer > 0 ? 1 : 0, sl: p.slideTimer > 0 ? 1 : 0,
+    pw: p.powerupTimer > 0 ? (p.powerupType === 'star' ? 1 : (p.powerupType === 'speed' ? 2 : 0)) : 0,
+    m, mx, my, t: Date.now(), ls: onlineLevelStartT
+  }).catch(() => {});
+}
+
+// ===================== BOUCLE HÔTE =====================
+function updateOnlineHost(){
+  if(!level) return;
+  if(!onlineMeta[myId]) onlineMeta[myId] = { charId: currentCharacterId, slot: 0, name: playerName };
+  Object.keys(onlineMeta).forEach(id => { if(onlinePlayerLives[id] == null) onlinePlayerLives[id] = MAX_LIVES; });
+  Object.keys(onlinePlayerLives).forEach(id => { if(!onlineMeta[id]){ delete onlinePlayerLives[id]; delete onlineAck[id]; } });
+  lives = onlinePlayerLives[myId] ?? MAX_LIVES;
+
+  if(simState() === 'playing'){
+    checkLifeRegen();
+    updateOnlinePlatforms();
+    onlineLocalStep();
+    if(simState() === 'playing'){
+      const targets = [];
+      Object.keys(onlineMeta).forEach(id => {
+        if((onlinePlayerLives[id] ?? MAX_LIVES) <= 0) return;
+        if(id === myId){ targets.push(player); return; }
+        const s = peerLatest[id];
+        if(s && s.ls === onlineLevelStartT) targets.push({ x: s.x, y: s.y, w: PLAYER_WIDTH, h: s.c ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT });
+      });
+      enemies.forEach(e => { if(e.alive) e.update(nearestPlayer(targets, e)); });
+      projectiles.forEach(p => { if(!p.dead) p.update(level.solids); });
+      enemies.forEach(e => {
+        if(!e.alive) return;
+        for(const p of projectiles){
+          if(p.hostile) continue;
+          if(!p.dead && rectsOverlap(p.rect, e.rect)){ p.dead = true; triggerShake(e.isBoss ? 7 : 2, e.isBoss ? 14 : 6); resolveEnemyHit(e, '#8ad4ff', '#8ad4ff'); break; }
+        }
+      });
+      projectiles = projectiles.filter(p => !p.dead);
+
+      const bossAlive = enemies.some(e => e.isBoss && e.alive);
+      const activeIds = Object.keys(onlineMeta).filter(id => (onlinePlayerLives[id] ?? MAX_LIVES) > 0);
+      const atGoal = id => {
+        let r;
+        if(id === myId) r = player;
+        else {
+          const s = peerLatest[id];
+          if(!s || s.ls !== onlineLevelStartT) return false;
+          r = { x: s.x, y: s.y, w: PLAYER_WIDTH, h: s.c ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT };
+        }
+        return r.x + r.w > level.goalX && Math.abs((r.y + r.h) - level.goalY) < 120;
+      };
+      if(!bossAlive && activeIds.length > 0 && activeIds.every(atGoal)){
+        const total = level.coins.length, got = level.coins.filter(c => c.taken).length;
+        let stars = 1; if(livesLostThisLevel === 0) stars++; if(total === 0 || got === total) stars++;
+        levelClearStars = stars; levelClearCoins = got; levelClearCoinsTotal = total;
+        if(stars === 3) ST.perfect++;
+        spawnParticles(level.goalX, level.goalY - 80, 40, '#ffd700', { spd:3, spdVar:4, life:50, size:3.5, up:3 });
+        lives = onlinePlayerLives[myId] ?? MAX_LIVES;
+        setSimState('clear'); playSfx('levelclear'); saveGame();
+      }
+    }
+  }
+  lives = onlinePlayerLives[myId] ?? MAX_LIVES;
+  updateOnlineCamera();
+
+  const ss = simState(), interval = ss === 'playing' ? NET_SEND_EVERY : 12;
+  if(onlineStateRef && (ss !== lastBroadcastState || frameTick - lastOnlineBroadcastTick >= interval)){
+    lastOnlineBroadcastTick = frameTick; lastBroadcastState = ss;
+    onlineStateRef.set({
+      world: worldIndex, level: levelIndex, state: ss, ls: onlineLevelStartT,
+      score, lives: { ...onlinePlayerLives }, ack: { ...onlineAck },
+      e: enemies.map(e => [rnd1(e.x), rnd1(e.y), e.dir, e.alive ? 1 : 0, e.hp, e.maxHp, (e.isBoss && e.attackState === 'telegraph') ? (e.attackKind === 'dash' ? 1 : 2) : 0]),
+      pr: projectiles.map(p => ({ x: rnd1(p.x0), y: rnd1(p.y), d: p.dir, t: p.t0, h: p.hostile ? 1 : 0, c: p.color, o: p.owner || '' })),
+      ct: level.coins.map(c => c.taken ? '1' : '0').join(''),
+      cs: [levelClearStars, levelClearCoins, levelClearCoinsTotal],
+      t: serverNow()
+    }).catch(() => {});
+  }
+  if(ss === 'playing') sendMyState();
+}
+
+// ===================== BOUCLE INVITÉ =====================
+function updateOnlineGuest(){
+  const snap = remoteSnapshot;
+  if(!snap) return;
+  netBanner('');
+  ensureOnlineLevel(snap);
+  score = snap.score || 0;
+  if(snap.cs){ levelClearStars = snap.cs[0]; levelClearCoins = snap.cs[1]; levelClearCoinsTotal = snap.cs[2]; }
+  const base = (snap.lives && snap.lives[myId] != null) ? snap.lives[myId] : MAX_LIVES;
+  const ack = (snap.ack && snap.ack[myId]) || 0;
+  const newLives = Math.max(0, base - Math.max(0, hurtSeq - ack));
+  if(lastGuestLives != null && lastGuestLives <= 0 && newLives > 0 && level){ const s = mySpawn(); player.reset(s.x, s.y); }
+  lives = newLives; lastGuestLives = newLives;
+
+  const ss = snap.state || 'playing';
+  if(ss === 'clear' && lastNetState !== 'clear'){
+    spawnParticles(level.goalX, level.goalY - 80, 40, '#ffd700', { spd:3, spdVar:4, life:50, size:3.5, up:3 });
+    playSfx('levelclear');
+  }
+  lastNetState = ss;
+  if(simState() !== ss) setSimState(ss);
+
+  if(typeof snap.ct === 'string'){
+    for(let i = 0; i < snap.ct.length; i++){
+      const c = level.coins[i];
+      if(snap.ct.charCodeAt(i) === 49 && c && !c.taken){ c.taken = true; spawnParticles(c.x, c.y, 6, '#ffd700', { spd:1.6, spdVar:1.4, life:18, size:2.2, up:1 }); }
+    }
+  }
+  updateOnlinePlatforms();
+  applyNetWorldView();
+  onlineLocalStep();
+  updateOnlineCamera();
+  if(simState() === 'playing') sendMyState();
+}
+
+// ===================== RENDU DES AUTRES JOUEURS (3D) =====================
+const peerMeshes = new Map();   // id -> { def, mesh, shown }
+const tagEls = new Map();       // id -> div
+const tagList = [];
+const _tagV = new THREE.Vector3();
+function disposePeerMesh(e){
+  if(!e || !e.mesh) return;
+  entGroup.remove(e.mesh.root);
+  if(!e.def.custom) e.mesh.root.traverse(n => {
+    if(n.geometry && !SHARED.has(n.geometry)) n.geometry.dispose();
+    if(n.material && n.material.dispose) n.material.dispose();
+  });
+}
+function updatePeerMeshes(){
+  tagList.length = 0;
+  if(!onlineMode){ if(peerMeshes.size){ peerMeshes.forEach(e => disposePeerMesh(e)); peerMeshes.clear(); } return; }
+  const usedCustom = new Set();
+  if(playerMeshId && playerMeshId.custom) usedCustom.add(playerMeshId);
+  Object.keys(onlineMeta).forEach(id => {
+    if(id === myId) return;
+    const meta = onlineMeta[id];
+    let e = peerMeshes.get(id);
+    if(e) e.shown = false;
+    const tl = peerTL[id];
+    if(!tl || !tl.buf.length || tl.buf[tl.buf.length - 1].ls !== onlineLevelStartT) { if(e) e.mesh.root.visible = false; return; }
+    if(getRoomMemberLives(id) <= 0){ if(e) e.mesh.root.visible = false; return; }
+    const rs = peerRenderState(id);
+    if(!rs){ if(e) e.mesh.root.visible = false; return; }
+    let def = tintedDef(meta.charId || 'zkr', meta.slot);
+    if(def.custom){ if(usedCustom.has(def)) def = tintedDef('zkr', meta.slot); else usedCustom.add(def); }
+    if(!e || e.def !== def){
+      if(e) disposePeerMesh(e);
+      const mesh = makePlayerMesh(def);
+      const au = new THREE.Mesh(geoSphere, new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.25, depthWrite: false }));
+      au.scale.setScalar(1.3); au.position.y = 1; au.visible = false; mesh.root.add(au); mesh.aura = au;
+      entGroup.add(mesh.root);
+      e = { def, mesh, shown: false }; peerMeshes.set(id, e);
+    }
+    const pm = e.mesh, rh = rs.crouch ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT;
+    pm.root.visible = true; e.shown = true;
+    pm.root.position.set(wx(rs.x + PLAYER_WIDTH/2), wy(rs.y + rh), 0);
+    const target = rs.facing > 0 ? Math.PI/2 : -Math.PI/2;
+    let d = target - pm.root.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); pm.root.rotation.y += d * 0.35;
+    const sr = Math.min(Math.abs(rs.vx) / MOVE_SPEED, 1);
+    const sw = rs.onGround ? Math.sin(frameTick * 0.4) * 0.75 * sr : 0.4;
+    pm.legL.rotation.x = sw; pm.legR.rotation.x = -sw; pm.armL.rotation.x = -sw; pm.armR.rotation.x = sw;
+    if(!rs.onGround){ pm.armL.rotation.z = 0.5; pm.armR.rotation.z = -0.5; } else { pm.armL.rotation.z = 0; pm.armR.rotation.z = 0; }
+    pm.body.rotation.x = sr * 0.12 + (rs.slide ? 0.35 : 0);
+    if(pm.rig) rigApply(pm.rig, rs.onGround
+      ? { head: Math.sin(frameTick * 0.8) * 0.05 * sr, legL: sw, legR: -sw, armL: -sw, armR: sw }
+      : { head: -0.18, armL: -0.4, armR: 0.4, legL: 0.4, legR: -0.4 });
+    pm.root.scale.set(1, rh / PLAYER_HEIGHT, 1);
+    if(rs.inv && frameTick % 8 >= 5) pm.root.visible = false;
+    const pw = !!rs.pw;
+    pm.aura.visible = pw;
+    if(pw){ pm.aura.material.color.set(rs.pw === 'star' ? 0xffe066 : 0x5ad1ff); pm.aura.material.opacity = 0.2 + 0.1 * Math.sin(frameTick * 0.3); }
+    tagList.push({ id, name: meta.name || 'Joueur', x: pm.root.position.x, y: pm.root.position.y + rh * S + 0.3, color: '#ffcf5f' });
+  });
+  peerMeshes.forEach((e, id) => { if(!onlineMeta[id]){ disposePeerMesh(e); peerMeshes.delete(id); } });
+}
+function updateNameTags(){
+  const box = $('tags');
+  if(!onlineMode){ if(tagEls.size){ tagEls.forEach(el => el.remove()); tagEls.clear(); } return; }
+  if(state !== 'menu' && state !== 'online' && playerMesh && !amIEliminated() && (isHost || remoteSnapshot)){
+    const p = player, meta = onlineMeta[myId] || { name: playerName };
+    tagList.push({ id: myId, name: meta.name || playerName, x: playerMesh.root.position.x, y: playerMesh.root.position.y + p.h * S + 0.3, color: '#5fd0ff' });
+  }
+  camera.updateMatrixWorld(); camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+  const W = window.innerWidth, H = window.innerHeight, seen = new Set();
+  tagList.forEach(t => {
+    seen.add(t.id);
+    let el = tagEls.get(t.id);
+    if(!el){ el = document.createElement('div'); el.className = 'ntag'; box.appendChild(el); tagEls.set(t.id, el); }
+    if(el.textContent !== t.name) el.textContent = t.name;
+    el.style.color = t.color;
+    _tagV.set(t.x, t.y, 0).project(camera);
+    if(_tagV.z > 1){ el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.style.left = ((_tagV.x * 0.5 + 0.5) * W) + 'px'; el.style.top = ((-_tagV.y * 0.5 + 0.5) * H) + 'px';
+  });
+  tagEls.forEach((el, id) => { if(!seen.has(id)) el.style.display = 'none'; });
+}
+
+// ===================== UI : panneau « en ligne » =====================
+$('nameInput').addEventListener('input', e => {
+  const v = e.target.value.replace(/[<>&"'`]/g, '').slice(0, 14);
+  if(v.trim()){ playerName = v.trim(); saveGame(); }
+});
+$('onlineCreateBtn').addEventListener('click', function(){ this.blur(); if(onlineMode) leaveOnlineRoom(); createOnlineRoom(); });
+$('onlineJoinBtn').addEventListener('click', function(){ this.blur(); if(onlineMode) leaveOnlineRoom(); joinOnlineRoom($('onlineCodeInput').value); });
+$('onlineCodeInput').addEventListener('keydown', e => { if(e.key === 'Enter'){ if(onlineMode) leaveOnlineRoom(); joinOnlineRoom(e.target.value); } });
+$('netPill').addEventListener('click', () => { try { navigator.clipboard.writeText(roomCode || ''); onlineSetStatus('Code copié : ' + roomCode); } catch(e){} });
 
 savedData = loadGame(); applySaved(savedData);
 $('musicToggle').checked = musicEnabled; $('vol').value = Math.round(musicVolume * 100); applyMusicSettings();
