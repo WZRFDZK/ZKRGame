@@ -63,6 +63,7 @@ h2{margin:0;font-size:26px;letter-spacing:1px;text-shadow:0 0 14px var(--acc)}
 .guestOnly{display:none}body.guestMode .guestOnly{display:block}body.guestMode .hostOnly{display:none!important}
 #netPill{pointer-events:auto;cursor:pointer;display:none}
 #specBar{position:fixed;left:50%;top:92px;transform:translateX(-50%);z-index:10;display:none;background:rgba(0,0,0,.65);border:1px solid rgba(255,207,95,.6);color:#ffcf5f;border-radius:99px;padding:6px 16px;font-weight:bold;font-size:14px;white-space:nowrap}
+#goalBar{position:fixed;left:50%;top:128px;transform:translateX(-50%);z-index:10;display:none;background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.5);border-radius:99px;padding:6px 16px;font-weight:bold;font-size:14px;white-space:nowrap}
 #netBanner{white-space:pre-line;line-height:1.5;position:fixed;left:50%;top:46%;transform:translateX(-50%);z-index:14;display:none;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.35);border-radius:14px;padding:12px 22px;font-weight:bold;font-size:17px;text-align:center}
 #tags{position:fixed;inset:0;pointer-events:none;z-index:9;overflow:hidden}
 .ntag{position:absolute;transform:translate(-50%,-100%);font-weight:bold;font-size:13px;text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap;display:none}
@@ -85,7 +86,7 @@ body.touchdev #chatPanel{bottom:176px}
   <div id="hudRight"><div id="lvlName"></div><div id="hudHint">M : carte · C : personnage · H : accueil</div></div>
 </div>
 <div id="bossBar"><div id="bossName"></div><div id="bossTrack"><div id="bossFill"></div></div></div>
-<div id="floats"></div><div id="tags"></div><div id="specBar"></div><div id="netBanner"></div>
+<div id="floats"></div><div id="tags"></div><div id="specBar"></div><div id="goalBar"></div><div id="netBanner"></div>
 <button class="ico" id="fsBtn" style="right:10px" title="Plein écran">⛶</button>
 
 <div id="ui">
@@ -1728,7 +1729,7 @@ const myId = 'p_' + Math.random().toString(36).slice(2, 9);
 let onlinePlayerLives = {}, onlineAck = {}, onlineMeta = {};
 let onlineRoomRef = null, onlineStateRef = null, onlinePlayersRef = null, onlinePresenceRef = null, onlineChatRef = null;
 let onlinePStateAllRef = null, onlinePStateRef = null, onlineEventsRef = null;
-let remoteSnapshot = null, snapTL = null, peerTL = {}, peerLatest = {};
+let remoteSnapshot = null, snapTL = null, peerTL = {}, peerLatest = {}, peerSeen = {}, goalHint = '';
 let myShots = [], hurtSeq = 0, lastGuestLives = null, lastNetState = null;
 let onlineWorld = -1, onlineLevel = -1, onlineLs = 0, onlineLevelStartT = 0, onlinePlatTick = 0;
 let localKilled = {}, stompSentAt = {};
@@ -1745,7 +1746,7 @@ const simState = () => (state === 'map' || state === 'chars') ? overlayPrev : st
 function setSimState(s){ if(state === 'map' || state === 'chars') overlayPrev = s; else setState(s); }
 function resetOnlineLives(){ if(onlineMode && isHost) Object.keys(onlineMeta).forEach(id => { onlinePlayerLives[id] = MAX_LIVES; }); }
 function resetOnlineSession(){
-  onlineAck = {}; onlinePlayerLives = {}; peerTL = {}; peerLatest = {}; snapTL = null; remoteSnapshot = null;
+  onlineAck = {}; onlinePlayerLives = {}; peerTL = {}; peerLatest = {}; peerSeen = {}; goalHint = ''; snapTL = null; remoteSnapshot = null;
   myShots = []; hurtSeq = 0; lastGuestLives = null; lastNetState = null; localKilled = {}; stompSentAt = {};
   spectateTargetId = null; lastBroadcastState = null; lastPstateSendTick = -999;
   onlineWorld = -1; onlineLevel = -1; onlineLs = 0; netProjCache.clear(); projectiles = [];
@@ -1798,7 +1799,7 @@ function setOnlineUI(on){
   document.body.classList.toggle('guestMode', on && !isHost);
   $('chatPanel').classList.toggle('active', on);
   $('hudHint').textContent = on ? (isHost ? 'M : carte · C : perso · T : chat · H : quitter' : 'C : perso · T : chat · H : quitter') : 'M : carte · C : personnage · H : accueil';
-  if(!on){ $('netPill').style.display = 'none'; $('specBar').style.display = 'none'; netBanner(''); $('chatMessages').textContent = ''; }
+  if(!on){ $('netPill').style.display = 'none'; $('specBar').style.display = 'none'; $('goalBar').style.display = 'none'; netBanner(''); $('chatMessages').textContent = ''; }
 }
 function openOnlinePanel(){
   $('nameInput').value = playerName;
@@ -1816,6 +1817,8 @@ function updateNetHUD(){
     const nm = (spectateTargetId && onlineMeta[spectateTargetId] && onlineMeta[spectateTargetId].name) || '…';
     setText('specBar', `👁 SPECTATEUR — ${nm}  (← → pour changer)`); sb.style.display = 'block';
   } else sb.style.display = 'none';
+  const gb = $('goalBar');
+  if(goalHint && simState() === 'playing'){ setText('goalBar', '🏁 ' + goalHint); gb.style.display = 'block'; } else gb.style.display = 'none';
 }
 
 // ---------- Ping ----------
@@ -2004,9 +2007,9 @@ function onPeerStates(val){
       if(last.ls !== s.ls) tl.buf.length = 0;
       else if(Math.abs(s.x - last.x) > 300 || Math.abs(s.y - last.y) > 300) s.j = 1;
     }
-    if(tlPush(tl, s)) peerLatest[id] = s;
+    if(tlPush(tl, s)){ peerLatest[id] = s; peerSeen[id] = Date.now(); }
   });
-  Object.keys(peerTL).forEach(id => { if(!val[id]){ delete peerTL[id]; delete peerLatest[id]; } });
+  Object.keys(peerTL).forEach(id => { if(!val[id]){ delete peerTL[id]; delete peerLatest[id]; delete peerSeen[id]; } });
 }
 function peerRenderState(id){
   const tl = peerTL[id];
@@ -2275,7 +2278,9 @@ function updateOnlineHost(){
       projectiles = projectiles.filter(p => !p.dead);
 
       const bossAlive = enemies.some(e => e.isBoss && e.alive);
-      const activeIds = Object.keys(onlineMeta).filter(id => (onlinePlayerLives[id] ?? MAX_LIVES) > 0);
+      const nowMs = Date.now();
+      // un joueur « fantôme » (onglet fermé / téléphone verrouillé, plus aucun signal depuis 5 s) ne bloque plus la validation
+      const activeIds = Object.keys(onlineMeta).filter(id => (onlinePlayerLives[id] ?? MAX_LIVES) > 0 && (id === myId || !(peerSeen[id] && nowMs - peerSeen[id] > 5000)));
       const atGoal = id => {
         let r;
         if(id === myId) r = player;
@@ -2286,7 +2291,13 @@ function updateOnlineHost(){
         }
         return r.x + r.w > level.goalX && Math.abs((r.y + r.h) - level.goalY) < 120;
       };
+      const atGoalIds = activeIds.filter(atGoal);
+      if(atGoalIds.length === 0) goalHint = '';
+      else if(bossAlive) goalHint = 'Bats le boss pour ouvrir l\'arrivée !';
+      else if(atGoalIds.length < activeIds.length) goalHint = 'En attente de : ' + activeIds.filter(id => !atGoalIds.includes(id)).map(id => (onlineMeta[id] && onlineMeta[id].name) || 'Joueur').join(', ');
+      else goalHint = '';
       if(!bossAlive && activeIds.length > 0 && activeIds.every(atGoal)){
+        goalHint = '';
         const total = level.coins.length, got = level.coins.filter(c => c.taken).length;
         let stars = 1; if(livesLostThisLevel === 0) stars++; if(total === 0 || got === total) stars++;
         levelClearStars = stars; levelClearCoins = got; levelClearCoinsTotal = total;
@@ -2309,7 +2320,7 @@ function updateOnlineHost(){
       e: enemies.map(e => [rnd1(e.x), rnd1(e.y), e.dir, e.alive ? 1 : 0, e.hp, e.maxHp, (e.isBoss && e.attackState === 'telegraph') ? (e.attackKind === 'dash' ? 1 : 2) : 0]),
       pr: projectiles.map(p => ({ x: rnd1(p.x0), y: rnd1(p.y), d: p.dir, t: p.t0, h: p.hostile ? 1 : 0, c: p.color, o: p.owner || '' })),
       ct: level.coins.map(c => c.taken ? '1' : '0').join(''),
-      cs: [levelClearStars, levelClearCoins, levelClearCoinsTotal],
+      cs: [levelClearStars, levelClearCoins, levelClearCoinsTotal], gh: goalHint,
       t: serverNow()
     }).catch(() => {});
   }
@@ -2336,6 +2347,7 @@ function updateOnlineGuest(){
     playSfx('levelclear');
   }
   lastNetState = ss;
+  goalHint = snap.gh || '';
   if(simState() !== ss) setSimState(ss);
 
   if(typeof snap.ct === 'string'){
