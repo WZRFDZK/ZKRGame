@@ -63,7 +63,7 @@ h2{margin:0;font-size:26px;letter-spacing:1px;text-shadow:0 0 14px var(--acc)}
 .guestOnly{display:none}body.guestMode .guestOnly{display:block}body.guestMode .hostOnly{display:none!important}
 #netPill{pointer-events:auto;cursor:pointer;display:none}
 #specBar{position:fixed;left:50%;top:92px;transform:translateX(-50%);z-index:10;display:none;background:rgba(0,0,0,.65);border:1px solid rgba(255,207,95,.6);color:#ffcf5f;border-radius:99px;padding:6px 16px;font-weight:bold;font-size:14px;white-space:nowrap}
-#netBanner{position:fixed;left:50%;top:46%;transform:translateX(-50%);z-index:14;display:none;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.35);border-radius:14px;padding:12px 22px;font-weight:bold;font-size:17px;text-align:center}
+#netBanner{white-space:pre-line;line-height:1.5;position:fixed;left:50%;top:46%;transform:translateX(-50%);z-index:14;display:none;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.35);border-radius:14px;padding:12px 22px;font-weight:bold;font-size:17px;text-align:center}
 #tags{position:fixed;inset:0;pointer-events:none;z-index:9;overflow:hidden}
 .ntag{position:absolute;transform:translate(-50%,-100%);font-weight:bold;font-size:13px;text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap;display:none}
 #chatPanel{position:fixed;left:10px;bottom:14px;width:min(290px,62vw);z-index:12;display:none;flex-direction:column;background:rgba(14,10,24,.72);border:1.5px solid rgba(255,255,255,.3);border-radius:10px;overflow:hidden;font-size:13px;-webkit-user-select:text;user-select:text}
@@ -1810,7 +1810,7 @@ function updateNetHUD(){
   const n = Math.max(1, Object.keys(onlineMeta).length);
   const ping = lastPingMs == null ? '…' : (lastPingMs < 0 ? 'erreur' : lastPingMs + ' ms');
   setText('netPill', `🌐 ${roomCode} · ${n} 👥 · ${ping}${fbConnected === false ? ' ⚠️' : ''}`);
-  $('netPill').style.display = '';
+  $('netPill').style.display = 'inline-block';
   const sb = $('specBar');
   if(amIEliminated() && simState() === 'playing'){
     const nm = (spectateTargetId && onlineMeta[spectateTargetId] && onlineMeta[spectateTargetId].name) || '…';
@@ -1917,6 +1917,9 @@ function createOnlineRoom(){
   worldIndex = 0; levelIndex = 0; lives = MAX_LIVES; score = 0; livesLostThisWorld = 0;
   onlinePlayerLives[myId] = MAX_LIVES;
   initLevel(); setState('playing');
+  const bannerTxt = `Salon créé !\nCode à donner à tes amis : ${roomCode}`;
+  netBanner(bannerTxt);
+  setTimeout(() => { if(onlineMode && $('netBanner').textContent === bannerTxt) netBanner(''); }, 12000);
 }
 function joinOnlineRoom(code){
   if(!fbDB){ onlineSetStatus('Connexion à Firebase indisponible (vérifie ta connexion).'); return; }
