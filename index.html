@@ -38,6 +38,7 @@ body.inMap #touch.on{display:none}
 #mapPanel.ow .owOnly{display:flex}
 #mapPanel.ow .gridOnly,#mapPanel.ow #mapGrid{display:none}
 #mapPanel.ow .btn{pointer-events:auto}
+body.guestMode #mapPanel .owOnly,body.guestMode #mapPanel>.btn{display:none!important}
 #owWorld{font-size:clamp(26px,5vw,46px);font-weight:900;letter-spacing:3px;text-shadow:0 3px 0 #000,0 0 18px currentColor}
 #owLevel{font-size:clamp(16px,2.6vw,24px);font-weight:bold;text-shadow:0 2px 6px #000}
 #owState{font-size:14px;opacity:.85;text-shadow:0 2px 6px #000}
@@ -706,14 +707,14 @@ let levelClearStars = 3, levelClearCoins = 0, levelClearCoinsTotal = 0;
 let unlockedFlat = 0, checkpointWorld = 0, checkpointScore = 0;
 let mapCursorWorld = 0, mapCursorLevel = 0, mapReturnsToPlay = false, charCursor = 0, charReturnsToPlay = false;
 let renderAlpha = 0;
-let overlayPrev = 'playing';
+let overlayPrev = 'playing', ownUF = null, owFromNet = null, lastMapKey = -1;
 let savedData = null;
 const SAVE_KEY = 'zkr3d_save_v1';
 
 function triggerShake(mag, dur){ screenShakeMag = Math.max(screenShakeMag, mag); screenShakeTimer = Math.max(screenShakeTimer, dur); }
 function saveGame(){
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ playerName, unlockedFlat, checkpointWorld, checkpointScore, currentCharacterId, musicEnabled, musicVolume, ST }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ playerName, unlockedFlat: ownUF != null ? ownUF : unlockedFlat, checkpointWorld, checkpointScore, currentCharacterId, musicEnabled, musicVolume, ST }));
   } catch(e){}
 }
 function loadGame(){ try { const r = localStorage.getItem(SAVE_KEY); return r ? JSON.parse(r) : null; } catch(e){ return null; } }
@@ -781,7 +782,7 @@ function initLevel(){
   player.reset(level.startX, level.startY);
   enemies = level.enemyData.map(e => new Enemy(e.x, e.y, e.left, e.right, e.speed, { ...e, kind: e.isBoss ? BOSS_KINDS[worldIndex] : ENEMY_KINDS[worldIndex] }));
   projectiles = []; clearParticles();
-  cameraX = 0; prevCam = 0; livesLostThisLevel = 0; comboCount = 0;
+  cameraX = 0; prevCam = 0; livesLostThisLevel = 0; comboCount = 0; owFromNet = null;
   lastLifeMilestone = Math.floor(score / 50);
   if(onlineMode && isHost){
     onlineLevelStartT = serverNow(); onlineLs = onlineLevelStartT; onlineWorld = worldIndex; onlineLevel = levelIndex;
@@ -822,12 +823,12 @@ function respawnAtCheckpoint(){
   worldIndex = checkpointWorld; levelIndex = 0; lives = MAX_LIVES; score = checkpointScore; resetOnlineLives();
   initLevel(); setState('playing'); saveGame();
 }
-function openMap(fromPlay){ overlayPrev = state; mapCursorWorld = worldIndex; mapCursorLevel = levelIndex; mapReturnsToPlay = !!fromPlay; owFrom = null; if(!onlineMode) triggerFade(); setState('map'); }
+function openMap(fromPlay){ overlayPrev = state; mapCursorWorld = worldIndex; mapCursorLevel = levelIndex; mapReturnsToPlay = !!fromPlay; owFrom = null; owFromNet = null; if(!onlineMode) triggerFade(); setState('map'); }
 function tryLaunchFromMap(){
   if(onlineMode && !isHost) return;
   if(FLAT(mapCursorWorld, mapCursorLevel) > unlockedFlat) return;
-  if(!onlineMode && !owArrived()) return;   // l'avatar marche encore
-  if(!onlineMode && owPending && mapCursorWorld === worldIndex && mapCursorLevel === levelIndex){
+  if(!owArrived()) return;   // l'avatar marche encore
+  if(owPending && mapCursorWorld === worldIndex && mapCursorLevel === levelIndex){
     owPending = false; playSfx('select'); initLevel(); setState('playing'); saveGame(); return;   // on continue la partie : vies conservées
   }
   owPending = false;
@@ -912,16 +913,8 @@ function onKeyPress(k){
       if(guest) break;
       if(k === ' ' || k === 'Enter') startNewGame(); else if(k === 'm') openMap(false); break;
     case 'map':
-      if(!onlineMode){
-        if(k === 'm' || k === 'Escape') setState(mapReturnsToPlay ? 'playing' : 'menu'); else owKey(k);
-        break;
-      }
-      if(k === 'ArrowLeft'){ mapCursorLevel = Math.max(0, mapCursorLevel - 1); playSfx('select'); renderMap(); }
-      else if(k === 'ArrowRight'){ mapCursorLevel = Math.min(LEVELS_PER_WORLD - 1, mapCursorLevel + 1); playSfx('select'); renderMap(); }
-      else if(k === 'ArrowUp'){ mapCursorWorld = Math.max(0, mapCursorWorld - 1); playSfx('select'); renderMap(); }
-      else if(k === 'ArrowDown'){ mapCursorWorld = Math.min(WORLD_THEMES.length - 1, mapCursorWorld + 1); playSfx('select'); renderMap(); }
-      else if(k === ' ' || k === 'Enter') tryLaunchFromMap();
-      else if(k === 'm' || k === 'Escape') setState(onlineMode ? overlayPrev : (mapReturnsToPlay ? 'playing' : 'menu'));
+      if(guest) break;
+      if(k === 'm' || k === 'Escape') setState(onlineMode ? overlayPrev : (mapReturnsToPlay ? 'playing' : 'menu')); else owKey(k);
       break;
     case 'chars':
       if(k === 'ArrowLeft'){ charCursor = Math.max(0, charCursor - 1); playSfx('select'); renderChars(); }
@@ -970,7 +963,7 @@ function setState(s){
   if(PANELS[s]) $(PANELS[s]).classList.add('on');
   $('hud').style.display = (s === 'menu' || s === 'online') ? 'none' : 'flex';
   if(s === 'map') renderMap();
-  document.body.classList.toggle('inMap', s === 'map' && !onlineMode);
+  document.body.classList.toggle('inMap', s === 'map');
   if(s === 'chars') renderChars();
   if(s === 'clear'){
     $('stars').textContent = '★'.repeat(levelClearStars) + '☆'.repeat(3 - levelClearStars);
@@ -982,14 +975,14 @@ function setState(s){
   document.documentElement.style.setProperty('--acc', `rgb(${WORLD_THEMES[Math.min(worldIndex,11)].accent.join(',')})`);
 }
 function renderMap(){
-  const g = $('mapGrid'), owOn = !onlineMode;
+  const g = $('mapGrid'), owOn = true;
   $('mapPanel').classList.toggle('ow', owOn);
   g.textContent = '';
   if(owOn){
     const th = WORLD_THEMES[mapCursorWorld], flat = FLAT(mapCursorWorld, mapCursorLevel), boss = mapCursorLevel === LEVELS_PER_WORLD - 1;
     $('owWorld').textContent = th.name; $('owWorld').style.color = `rgb(${th.accent.join(',')})`;
     $('owLevel').textContent = boss ? '💀 ' + BOSS_NAMES[Math.min(mapCursorWorld, 11)] : LEVEL_NAMES[mapCursorLevel];
-    $('owState').textContent = flat > unlockedFlat ? '🔒 Verrouillé' : (flat < unlockedFlat ? '✔ Terminé — ESPACE pour rejouer' : '▶ ESPACE : jouer');
+    $('owState').textContent = (onlineMode && !isHost) ? "⏳ L'hôte choisit le niveau…" : flat > unlockedFlat ? '🔒 Verrouillé' : (flat < unlockedFlat ? '✔ Terminé — ESPACE pour rejouer' : '▶ ESPACE : jouer');
     return;
   }
   WORLD_THEMES.forEach((th, w) => {
@@ -1029,7 +1022,7 @@ function updateHUD(){
   const th = WORLD_THEMES[Math.min(worldIndex, 11)];
   setText('hearts', '❤️'.repeat(Math.max(0, lives)) || '💀');
   setText('scoreP', `⭐ ${score}`);
-  if(state === 'map' && !onlineMode) setText('lvlName', `${WORLD_THEMES[mapCursorWorld].name} - ${LEVEL_NAMES[mapCursorLevel]}`);
+  if(state === 'map') setText('lvlName', `${WORLD_THEMES[mapCursorWorld].name} - ${LEVEL_NAMES[mapCursorLevel]}`);
   else setText('lvlName', `${th.name} - ${LEVEL_NAMES[levelIndex]}`);
   const cc = $('chipCombo');
   if(comboCount > 1){ cc.style.display = ''; setText('chipCombo', `🔥 COMBO x${comboCount}`); } else cc.style.display = 'none';
@@ -1637,6 +1630,7 @@ owGroup.add(owContent); owGroup.visible = false; scene.add(owGroup);
 let ow = null, owTex = [], owClouds = [], owAnim = [], owS = 0, owFrom = null, owPending = false;
 let owLast = 0, owActive = false, owBuiltWorld = -1, owBuiltUnlocked = -1;
 const owCam = new THREE.Vector3();
+const owPeers = new Map(), OW_OFF = [[0,0],[-0.9,0.8],[0.9,0.8],[0,1.5]], owOff = s => OW_OFF[(s || 0) % 4];
 
 function owLayout(w){
   const R = rngf(w*313 + 5), zs = OW_Z[w % 4], flip = Math.floor(w/4) % 2 === 1, nodes = [];
@@ -1809,7 +1803,7 @@ function owBuild(w){
   owBuiltWorld = w; owBuiltUnlocked = unlockedFlat;
 }
 function syncOverworld(){
-  const want = state === 'map' && !onlineMode;
+  const want = state === 'map';
   if(want){
     if(!owActive){ owActive = true; owBuiltWorld = -1; }
     if(owBuiltWorld !== mapCursorWorld || owBuiltUnlocked !== unlockedFlat) owBuild(mapCursorWorld);
@@ -1828,7 +1822,8 @@ function renderOverworld(){
   if(moving) owS += sg * Math.min(Math.abs(diff), 6.5 * dt); else owS = target;
   const sm = owSample(ow, owS), pm = playerMesh, root = pm.root;
   let near = 9; ow.nodes.forEach(n => { near = Math.min(near, Math.hypot(n.x - sm.pos.x, n.z - sm.pos.z)); });
-  root.position.set(sm.pos.x, 0.02 + 0.28 * Math.max(0, Math.min(1, (1.15 - near) / 0.5)), sm.pos.z);
+  const lift = 0.02 + 0.28 * Math.max(0, Math.min(1, (1.15 - near) / 0.5)), mo = owOff(mySlot());
+  root.position.set(sm.pos.x + mo[0], lift, sm.pos.z + mo[1]);
   root.scale.setScalar(0.62); root.visible = true; if(pm.aura) pm.aura.visible = false;
   const ty = moving ? Math.atan2(sm.dir.x * sg, sm.dir.z * sg) : 0;
   let d = ty - root.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); root.rotation.y += d * (moving ? 0.25 : 0.08);
@@ -1836,6 +1831,26 @@ function renderOverworld(){
   pm.legL.rotation.x = sw; pm.legR.rotation.x = -sw; pm.armL.rotation.x = -sw; pm.armR.rotation.x = sw; pm.armL.rotation.z = 0; pm.armR.rotation.z = 0;
   pm.body.rotation.x = moving ? 0.12 : 0; pm.body.position.y = moving ? Math.abs(Math.sin(t * 13)) * 0.07 : Math.sin(t * 2) * 0.015;
   if(pm.rig) rigApply(pm.rig, { head: 0, legL: sw, legR: -sw, armL: -sw, armR: sw });
+  if(onlineMode){
+    tagList.length = 0;
+    tagList.push({ id: myId, name: (onlineMeta[myId] && onlineMeta[myId].name) || playerName, x: root.position.x, y: root.position.y + 1.45, color: '#5fd0ff' });
+    Object.keys(onlineMeta).forEach(id => {
+      if(id === myId) return;
+      const meta = onlineMeta[id], cid = meta.charId || 'zkr', def = tintedDef(getCharacter(cid).custom ? 'zkr' : cid, meta.slot);
+      let e = owPeers.get(id);
+      if(!e || e.def !== def){
+        if(e){ owGroup.remove(e.mesh.root); disposeTree(e.mesh.root); }
+        e = { def, mesh: makePlayerMesh(def) }; owGroup.add(e.mesh.root); owPeers.set(id, e);
+      }
+      const m = e.mesh, r = m.root, o = owOff(meta.slot);
+      r.position.set(sm.pos.x + o[0], lift, sm.pos.z + o[1]); r.scale.setScalar(0.62); r.visible = true;
+      let dd = ty - r.rotation.y; dd = Math.atan2(Math.sin(dd), Math.cos(dd)); r.rotation.y += dd * (moving ? 0.25 : 0.08);
+      m.legL.rotation.x = sw; m.legR.rotation.x = -sw; m.armL.rotation.x = -sw; m.armR.rotation.x = sw;
+      m.body.rotation.x = pm.body.rotation.x; m.body.position.y = pm.body.position.y;
+      tagList.push({ id, name: meta.name || 'Joueur', x: r.position.x, y: r.position.y + 1.45, color: '#ffcf5f' });
+    });
+    owPeers.forEach((e, id) => { if(!onlineMeta[id]){ owGroup.remove(e.mesh.root); disposeTree(e.mesh.root); owPeers.delete(id); } });
+  }
   owAnim.forEach(a => {
     if(a.k === 'bob') a.o.position.y = a.base + Math.sin(t*2 + a.ph) * 0.09;
     else if(a.k === 'spin') a.o.rotation.y = t * 2.2;
@@ -1847,6 +1862,7 @@ function renderOverworld(){
   const asp = window.innerWidth / Math.max(1, window.innerHeight), kz = Math.max(1, Math.min(2, 1.5 / asp));
   camera.position.set(owCam.x, 11 * kz, owCam.z + 12.5 * kz); camera.lookAt(owCam.x, 0, owCam.z - 1.2);
   sunLight.position.set(owCam.x - 8, 20, owCam.z + 10); sunLight.target.position.set(owCam.x, 0, owCam.z);
+  if(onlineMode) updateNameTags();
   sunLight.target.updateMatrixWorld();
 }
 function owMaxLevel(w){ for(let l = LEVELS_PER_WORLD - 1; l >= 0; l--) if(FLAT(w, l) <= unlockedFlat) return l; return 0; }
@@ -1868,9 +1884,8 @@ function owKey(k){
 }
 // après un niveau réussi : retour sur la carte, l'avatar marche vers le niveau suivant
 function owArrive(pw, pl){
-  if(onlineMode){ initLevel(); setState('playing'); return; }
-  owFrom = { w: pw, l: pl }; owPending = true;
-  mapCursorWorld = worldIndex; mapCursorLevel = levelIndex; mapReturnsToPlay = false; overlayPrev = 'playing';
+  owFrom = { w: pw, l: pl }; owFromNet = [pw, pl]; owPending = true;
+  mapCursorWorld = worldIndex; mapCursorLevel = levelIndex; mapReturnsToPlay = false; overlayPrev = onlineMode ? 'clear' : 'playing';
   triggerFade(); setState('map');
 }
 
@@ -2080,8 +2095,8 @@ const nlerp = (a, b, k) => a + (b - a) * k;
 function serverNow(){ return Math.round(Date.now() + serverOffset); }
 function mySlot(){ return (onlineMeta[myId] && onlineMeta[myId].slot) || 0; }
 function mySpawn(){ return { x: level.startX + mySlot() * 40, y: level.startY }; }
-const simState = () => (state === 'map' || state === 'chars') ? overlayPrev : state;
-function setSimState(s){ if(state === 'map' || state === 'chars') overlayPrev = s; else setState(s); }
+const simState = () => (state === 'chars') ? overlayPrev : state;
+function setSimState(s){ if(state === 'chars') overlayPrev = s; else setState(s); }
 function resetOnlineLives(){ if(onlineMode && isHost) Object.keys(onlineMeta).forEach(id => { onlinePlayerLives[id] = MAX_LIVES; }); }
 function resetOnlineSession(){
   onlineAck = {}; onlinePlayerLives = {}; peerTL = {}; peerLatest = {}; peerSeen = {}; goalHint = ''; snapTL = null; remoteSnapshot = null;
@@ -2218,6 +2233,8 @@ function cleanupOnlineRefs(){
 }
 function leaveOnlineRoom(){
   cleanupOnlineRefs();
+  owPeers.forEach(e => { owGroup.remove(e.mesh.root); disposeTree(e.mesh.root); }); owPeers.clear();
+  if(ownUF != null){ unlockedFlat = ownUF; ownUF = null; }
   onlineMode = false; isHost = false; roomCode = null; onlineMeta = {};
   resetOnlineSession();
   setOnlineUI(false);
@@ -2274,7 +2291,7 @@ function joinOnlineRoom(code){
   stateRef.on('value', s2 => pushSnapshot(s2.val()));
   roomRef.child('meta').once('value').then(snap => {
     if(!snap.exists()){ playersRef.off(); stateRef.off(); onlineSetStatus(`Aucun salon "${code}" trouvé.`); return; }
-    joined = true; roomCode = code; isHost = false; onlineMode = true;
+    joined = true; roomCode = code; isHost = false; onlineMode = true; ownUF = unlockedFlat;
     onlineRoomRef = roomRef; onlineStateRef = stateRef; onlinePlayersRef = playersRef; onlinePresenceRef = presenceRef;
     onlinePStateAllRef = roomRef.child('pstate'); onlinePStateRef = onlinePStateAllRef.child(myId); onlineEventsRef = roomRef.child('events');
     presenceRef.set({ charId: currentCharacterId, slot: 99, joinedAt: Date.now(), name: playerName });
@@ -2651,16 +2668,16 @@ function updateOnlineHost(){
   lives = onlinePlayerLives[myId] ?? MAX_LIVES;
   updateOnlineCamera();
 
-  const ss = simState(), interval = ss === 'playing' ? NET_SEND_EVERY : 12;
-  if(onlineStateRef && (ss !== lastBroadcastState || frameTick - lastOnlineBroadcastTick >= interval)){
-    lastOnlineBroadcastTick = frameTick; lastBroadcastState = ss;
+  const ss = simState(), interval = ss === 'playing' ? NET_SEND_EVERY : 12, mk = mapCursorWorld * 10 + mapCursorLevel;
+  if(onlineStateRef && (ss !== lastBroadcastState || (ss === 'map' && mk !== lastMapKey) || frameTick - lastOnlineBroadcastTick >= interval)){
+    lastOnlineBroadcastTick = frameTick; lastBroadcastState = ss; lastMapKey = mk;
     onlineStateRef.set({
       world: worldIndex, level: levelIndex, state: ss, ls: onlineLevelStartT,
       score, lives: { ...onlinePlayerLives }, ack: { ...onlineAck },
       e: enemies.map(e => [rnd1(e.x), rnd1(e.y), e.dir, e.alive ? 1 : 0, e.hp, e.maxHp, (e.isBoss && e.attackState === 'telegraph') ? (e.attackKind === 'dash' ? 1 : 2) : 0]),
       pr: projectiles.map(p => ({ x: rnd1(p.x0), y: rnd1(p.y), d: p.dir, t: p.t0, h: p.hostile ? 1 : 0, c: p.color, o: p.owner || '' })),
       ct: level.coins.map(c => c.taken ? '1' : '0').join(''),
-      cs: [levelClearStars, levelClearCoins, levelClearCoinsTotal], gh: goalHint,
+      cs: [levelClearStars, levelClearCoins, levelClearCoinsTotal], gh: goalHint, mw: mapCursorWorld, ml: mapCursorLevel, uf: unlockedFlat, of: owFromNet || 0,
       t: serverNow()
     }).catch(() => {});
   }
@@ -2688,7 +2705,15 @@ function updateOnlineGuest(){
   }
   lastNetState = ss;
   goalHint = snap.gh || '';
-  if(simState() !== ss) setSimState(ss);
+  if(ss === 'map'){
+    if(typeof snap.uf === 'number') unlockedFlat = snap.uf;
+    const mw = snap.mw | 0, ml = snap.ml | 0, ch = mw !== mapCursorWorld || ml !== mapCursorLevel;
+    mapCursorWorld = mw; mapCursorLevel = ml;
+    if(state === 'chars') overlayPrev = 'map';
+    else if(state !== 'map'){ owFrom = snap.of ? { w: snap.of[0], l: snap.of[1] } : null; overlayPrev = 'map'; triggerFade(); setState('map'); }
+    else if(ch) renderMap();
+  } else if(state === 'map'){ overlayPrev = ss; setState(ss); }
+  else if(simState() !== ss) setSimState(ss);
 
   if(typeof snap.ct === 'string'){
     for(let i = 0; i < snap.ct.length; i++){
@@ -2766,7 +2791,7 @@ function updatePeerMeshes(){
 function updateNameTags(){
   const box = $('tags');
   if(!onlineMode){ if(tagEls.size){ tagEls.forEach(el => el.remove()); tagEls.clear(); } return; }
-  if(state !== 'menu' && state !== 'online' && playerMesh && !amIEliminated() && (isHost || remoteSnapshot)){
+  if(state !== 'menu' && state !== 'online' && !owActive && playerMesh && !amIEliminated() && (isHost || remoteSnapshot)){
     const p = player, meta = onlineMeta[myId] || { name: playerName };
     tagList.push({ id: myId, name: meta.name || playerName, x: playerMesh.root.position.x, y: playerMesh.root.position.y + p.h * S + 0.3, color: '#5fd0ff' });
   }
