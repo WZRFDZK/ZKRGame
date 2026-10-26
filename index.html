@@ -107,7 +107,9 @@ body.touchdev #chatPanel{bottom:176px}
   <div class="panel on" id="menu">
     <h1>ZKR 3D</h1>
     <div class="sub">LE BOSS DE LA STREET</div>
-    <button class="btn pri" data-key=" ">▶ JOUER (ESPACE)</button>
+    <button class="btn pri" data-key=" " id="playBtn">▶ JOUER (ESPACE)</button>
+    <div class="small" id="contInfo" style="display:none"></div>
+    <button class="btn" data-key="g" id="newGameBtn" style="display:none;min-width:376px">↺ NOUVELLE PARTIE (G)</button>
     <div class="row">
       <button class="btn" data-key="m" style="min-width:180px">🗺 CARTE (M)</button>
       <button class="btn" data-key="c" style="min-width:180px">🧑 PERSONNAGES (C)</button>
@@ -281,6 +283,7 @@ const SHOP_DEFAULT = [
   { id:'startspeed', name:'Éclair de départ', desc:'Tu commences le prochain niveau très rapide.', price:30, type:'speed', value:6, limit:0, color:'#5ad1ff', enabled:true }
 ];
 const SHOPSAVE = { spent:0, extraLives:0, bought:{}, inv:{}, chars:{} };
+let gameStarted = false;   // vrai dès qu'un niveau a été lancé : le menu affiche alors CONTINUER
 let SHOP_ITEMS = SHOP_DEFAULT.map(i => ({ ...i })), shopRemote = null, shopCursor = 0, shopOpen = false, levelFresh = false;
 const shopTxt = (v, max) => String(v == null ? '' : v).replace(/[<>`]/g, '').slice(0, max);
 function shopClean(arr){
@@ -913,7 +916,7 @@ function triggerShake(mag, dur){ screenShakeMag = Math.max(screenShakeMag, mag);
 function saveGame(){
   if(customPlay) return;
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ savedAt: Date.now(), playerName, unlockedFlat: ownUF != null ? ownUF : unlockedFlat, checkpointWorld, checkpointScore, currentCharacterId, musicEnabled, musicVolume, ST, shop: SHOPSAVE }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ savedAt: Date.now(), playerName, unlockedFlat: ownUF != null ? ownUF : unlockedFlat, checkpointWorld, checkpointScore, currentCharacterId, musicEnabled, musicVolume, ST, shop: SHOPSAVE, started: gameStarted }));
     accQueueSync();
   } catch(e){}
 }
@@ -925,6 +928,8 @@ function applySaved(d){
   currentCharacterId = d.currentCharacterId ?? 'zkr'; musicEnabled = d.musicEnabled ?? true; musicVolume = d.musicVolume ?? 0.45;
   if(d.ST) Object.keys(ST).forEach(k => { ST[k] = d.ST[k] || 0; });
   shopSanitizeSave(d.shop);
+  gameStarted = d.started != null ? !!d.started : (unlockedFlat > 0 || checkpointWorld > 0 || ST.coins > 0 || ST.kills > 0);
+  refreshMenu();
 }
 
 function applyCoinPickup(c, p, remote){
@@ -1021,6 +1026,22 @@ function startNewGame(){
   checkpointWorld = 0; checkpointScore = 0; livesLostThisWorld = 0;
   initLevel(); setState('playing'); saveGame();
 }
+function refreshMenu(){
+  const pb = $('playBtn'); if(!pb) return;
+  const cont = gameStarted && !onlineMode;
+  pb.textContent = cont ? '▶ CONTINUER (ESPACE)' : '▶ JOUER (ESPACE)';
+  $('newGameBtn').style.display = cont ? '' : 'none';
+  const ci = $('contInfo');
+  if(cont){
+    const w = Math.min(WORLD_THEMES.length - 1, Math.floor(unlockedFlat / LEVELS_PER_WORLD)), l = unlockedFlat % LEVELS_PER_WORLD;
+    ci.textContent = `${WORLD_THEMES[w].name} · ${l === LEVELS_PER_WORLD - 1 ? 'BOSS' : LEVEL_NAMES[l]}`; ci.style.display = '';
+  } else ci.style.display = 'none';
+}
+function continueGame(){
+  const w = Math.min(WORLD_THEMES.length - 1, Math.floor(unlockedFlat / LEVELS_PER_WORLD)), l = unlockedFlat % LEVELS_PER_WORLD;
+  owPending = false; worldIndex = w; levelIndex = l; lives = MAX_LIVES; score = checkpointScore; livesLostThisWorld = 0; resetOnlineLives();
+  initLevel(); setState('playing'); saveGame();
+}
 function respawnAtCheckpoint(){
   worldIndex = checkpointWorld; levelIndex = 0; lives = MAX_LIVES; score = checkpointScore; resetOnlineLives();
   initLevel(); setState('playing'); saveGame();
@@ -1100,7 +1121,7 @@ function onKeyPress(k){
   const guest = onlineMode && !isHost;
   switch(state){
     case 'menu':
-      if(k === ' ' || k === 'Enter') startNewGame(); else if(k === 'm') openMap(false); else if(k === 'c') openChars(false); else if(k === 'o') openOnlinePanel(); else if(k === 'b') openShop(); else if(k === 'k') openAcc(); else if(k === 'n') mkOpenModal('hub'); break;
+      if(k === ' ' || k === 'Enter'){ if(gameStarted && !onlineMode) continueGame(); else startNewGame(); } else if(k === 'g'){ if(gameStarted) startNewGame(); } else if(k === 'm') openMap(false); else if(k === 'c') openChars(false); else if(k === 'o') openOnlinePanel(); else if(k === 'b') openShop(); else if(k === 'k') openAcc(); else if(k === 'n') mkOpenModal('hub'); break;
     case 'online':
       if(k === 'Escape') setState('menu'); break;
     case 'playing':
@@ -1170,7 +1191,7 @@ const PANELS = { menu:'menu', online:'onlinePanel', map:'mapPanel', chars:'charP
 function setState(s){
   if(shopOpen){ shopOpen = false; $('shopPanel').classList.remove('on'); }
   if(accOpen){ accOpen = false; $('accPanel').classList.remove('on'); }
-  if(s === 'playing' && levelFresh){ levelFresh = false; shopApplyStart(); }
+  if(s === 'playing' && levelFresh){ levelFresh = false; if(!customPlay) gameStarted = true; shopApplyStart(); }
   state = s;
   Object.values(PANELS).forEach(id => $(id).classList.remove('on'));
   if(PANELS[s]) $(PANELS[s]).classList.add('on');
@@ -1185,7 +1206,7 @@ function setState(s){
     $('clearInfo').textContent = `🪙 ${levelClearCoins} / ${levelClearCoinsTotal}     ${'❤️'.repeat(Math.max(0, lives))}`;
   }
   if(s === 'over') $('overBtn').textContent = customPlay ? 'RÉESSAYER (ESPACE)' : `REJOUER DEPUIS ${WORLD_THEMES[checkpointWorld].name} (ESPACE)`;
-  if(s === 'menu') $('menu').querySelector('.btn.pri').textContent = '▶ JOUER (ESPACE)';
+  if(s === 'menu') refreshMenu();
   document.documentElement.style.setProperty('--acc', `rgb(${WORLD_THEMES[Math.min(worldIndex,11)].accent.join(',')})`);
 }
 function renderMap(){
@@ -3981,7 +4002,7 @@ async function mkCopyCommunity(l){
 mkLayout();
 
 
-savedData = loadGame(); applySaved(savedData); shopLoad(); accRestore();
+savedData = loadGame(); applySaved(savedData); shopLoad(); accRestore(); refreshMenu();
 $('musicToggle').checked = musicEnabled; $('vol').value = Math.round(musicVolume * 100); applyMusicSettings();
 initLevel();
 setState('menu');
