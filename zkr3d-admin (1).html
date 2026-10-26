@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ZKR 3D - Admin Personnages</title>
+<title>ZKR 3D - Admin Personnages &amp; Boutique</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -36,12 +36,16 @@ button.big.alt{background:#2b5ea8;border-color:#5b93f0}
 #msg{position:absolute;left:12px;bottom:12px;background:rgba(0,0,0,.7);padding:8px 12px;border-radius:8px;max-width:70%;display:none}
 #hint{position:absolute;right:12px;top:12px;background:rgba(0,0,0,.55);padding:8px 10px;border-radius:8px;font-size:12px;max-width:260px;line-height:1.4}
 .small{font-size:11px;opacity:.7;line-height:1.4}
+.sitem{background:#150f2b;border:1px solid #3a2d6b;border-left:6px solid #ffd700;border-radius:8px;padding:8px;margin:6px 0}
+.sitem.off{opacity:.55}.sitem .hd{display:flex;gap:6px;align-items:center}.sitem .hd input[type=text]{font-weight:bold}
+.sitem .hd button{flex:none;padding:4px 8px}.sitem label{margin:4px 0 2px}
+#shopState{font-size:11px;margin-top:4px;color:#9fe8a8}
 </style>
 </head>
 <body>
 <div id="app">
   <div id="side">
-    <h1>🛠 ZKR 3D · Admin personnages</h1>
+    <h1>🛠 ZKR 3D · Admin personnages &amp; boutique</h1>
     <div class="small">Importe un modèle 3D (.glb ou .gltf), place-le, indique ses articulations, puis enregistre-le : il apparaît dans le jeu automatiquement (même navigateur) ou via le catalogue public / fichier <b>.zkrchar</b> (écran « Personnages » → IMPORTER).</div>
 
     <h3>1 · MODÈLE 3D</h3>
@@ -92,7 +96,7 @@ button.big.alt{background:#2b5ea8;border-color:#5b93f0}
     <h3>6 · PERSONNAGES ENREGISTRÉS</h3>
     <div id="saved"></div>
     <div class="row" style="margin-top:6px"><button class="big alt" id="btnCatalog">📦 Exporter le catalogue public</button></div>
-    <div class="small" style="margin-top:4px">Télécharge <b>zkr3d-chars.json</b> (tous les persos enregistrés ci-dessus). Mets ce fichier <b>dans le même dossier que zkr3d.html</b> sur ton site (ex. GitHub Pages) : le jeu le charge au démarrage et chaque joueur voit les persos. Pour retirer un perso du public, supprime-le de la liste puis ré-exporte le catalogue.</div>
+    <div class="small" style="margin-top:4px">Télécharge <b>zkr3d-chars.json</b> (tous les persos enregistrés ci-dessus + la boutique, section 8). Mets ce fichier <b>dans le même dossier que zkr3d.html</b> sur ton site (ex. GitHub Pages) : le jeu le charge au démarrage et chaque joueur voit les persos. Pour retirer un perso du public, supprime-le de la liste puis ré-exporte le catalogue.</div>
 
     <h3>7 · PUBLICATION POUR TOUS LES JOUEURS</h3>
     <div class="small">Envoie automatiquement le catalogue sur ton dépôt GitHub (celui de ton site GitHub Pages) : chaque joueur reçoit les persos au prochain chargement du jeu.</div>
@@ -102,6 +106,13 @@ button.big.alt{background:#2b5ea8;border-color:#5b93f0}
     <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pubAuto" checked> Publier automatiquement à chaque enregistrement / suppression</label>
     <div class="row" style="margin-top:6px"><button class="big" id="btnPublish">🚀 Publier maintenant</button></div>
     <div class="small" style="margin-top:4px">Token : GitHub → Settings → Developer settings → Fine-grained tokens → limité à ce dépôt, permission « Contents : Read and write ». Le chemin doit être dans le même dossier que zkr3d.html (ex. <b>jeu/zkr3d-chars.json</b> si le jeu est dans /jeu).</div>
+
+    <h3>8 · BOUTIQUE DU JEU</h3>
+    <div class="small">Les joueurs dépensent leurs pièces collectées dans l'écran « BOUTIQUE » du menu. Ajoute, modifie, réordonne ou masque des articles : les changements sont enregistrés tout seuls dans ce navigateur (le jeu se met à jour en direct s'il est ouvert sur le même site). Pour <b>tous les joueurs</b>, clique « Enregistrer et publier » (ou « Exporter le catalogue public » : la boutique est dans le même fichier <b>zkr3d-chars.json</b>).</div>
+    <div id="shopList"></div>
+    <div class="row" style="margin-top:6px"><button id="btnShopAdd">＋ Ajouter un article</button><button id="btnShopReset">↺ Articles par défaut</button></div>
+    <div class="row" style="margin-top:6px"><button class="big" id="btnShopSave">🛒 Enregistrer et publier la boutique</button></div>
+    <div id="shopState"></div>
     <div style="height:30px"></div>
   </div>
   <div id="view">
@@ -371,6 +382,7 @@ buildSlotSelects();
 async function refreshSaved(){
   const box = $('saved'); box.textContent = '';
   let all = []; try { all = await IDB.all(); } catch(e){}
+  savedChars = all; if(shopItems) renderShopAdmin();
   if(!all.length){ box.innerHTML = '<div class="small">Aucun perso enregistré dans ce navigateur.</div>'; return; }
   all.forEach(d => {
     const r = document.createElement('div'); r.className = 'slot';
@@ -385,11 +397,11 @@ async function refreshSaved(){
 }
 $('btnCatalog').onclick = async () => {
   let all = []; try { all = await IDB.all(); } catch(e){}
-  if(!all.length){ msg('Aucun perso enregistré : clique d\'abord « Enregistrer dans ce navigateur ».', 5000); return; }
-  const blob = new Blob([JSON.stringify({ format:'zkrcatalog', v:1, chars:all })], { type:'application/json' }), a = document.createElement('a');
+  if(!all.length && !shopTouched){ msg('Rien à exporter : enregistre un perso ou modifie la boutique d\'abord.', 5000); return; }
+  const blob = new Blob([JSON.stringify({ format:'zkrcatalog', v:1, chars:all, shop:shopPublicData() })], { type:'application/json' }), a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = 'zkr3d-chars.json'; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  msg(all.length + ' perso(s) exporté(s) : place zkr3d-chars.json à côté de zkr3d.html.', 8000);
+  msg(all.length + ' perso(s)' + (shopTouched ? ' + boutique' : '') + ' exporté(s) : place zkr3d-chars.json à côté de zkr3d.html.', 8000);
 };
 
 // ---- Publication GitHub (catalogue pour tous les joueurs) ----
@@ -406,11 +418,11 @@ async function publishAll(silent){
   try {
     msg('Publication en cours…', 60000);
     const all = await IDB.all();
-    const json = JSON.stringify({ format:'zkrcatalog', v:1, chars:all });
+    const json = JSON.stringify({ format:'zkrcatalog', v:1, chars:all, shop:shopPublicData() });
     let sha;
     const g = await fetch(api + '?ref=' + encodeURIComponent(c.branch), { headers:Object.assign({ Accept:'application/vnd.github.object+json' }, h) });
     if(g.ok) sha = (await g.json()).sha; else if(g.status !== 404) throw new Error('lecture ' + g.status + (g.status === 401 ? ' (token invalide)' : ''));
-    const body = { message:'Catalogue personnages ZKR 3D (' + all.length + ')', content:bufToB64(new TextEncoder().encode(json)), branch:c.branch }; if(sha) body.sha = sha;
+    const body = { message:'Catalogue ZKR 3D (' + all.length + ' persos' + (shopTouched ? ', boutique' : '') + ')', content:bufToB64(new TextEncoder().encode(json)), branch:c.branch }; if(sha) body.sha = sha;
     const r = await fetch(api, { method:'PUT', headers:Object.assign({ Accept:'application/vnd.github+json', 'Content-Type':'application/json' }, h), body:JSON.stringify(body) });
     if(!r.ok){ let t = ''; try { t = (await r.json()).message; } catch(e){} throw new Error(r.status + ' ' + t); }
     msg('Publié pour tous les joueurs (' + all.length + ' perso' + (all.length > 1 ? 's' : '') + '). Visible dans 1 à 2 min (GitHub Pages).', 9000); return true;
@@ -418,7 +430,71 @@ async function publishAll(silent){
 }
 function autoPublish(){ if(pubCfg().auto) publishAll(true); }
 $('btnPublish').onclick = () => publishAll(false);
+
+// ---- Boutique ----
+const SHOPK = 'zkr3d_shop';
+const SHOP_TYPES = { life:'Cœur bonus (+ vies max, permanent)', star:'Étoile de départ (invincible)', speed:'Éclair de départ (vitesse)', char:'Personnage à débloquer' };
+const BUILTIN_CHARS = [['kenji', 'KENJI'], ['sakura', 'SAKURA'], ['leo', 'LÉO'], ['legend', 'ZKR LÉGENDE'], ['raven', 'RAVEN'], ['ace', 'ACE'], ['phoenix', 'PHÉNIX']];
+const SHOP_DEF = [
+  { id:'heart', name:'Cœur bonus', desc:'Une vie de plus à chaque niveau, pour toujours.', price:150, type:'life', value:1, limit:2, color:'#ff4a6a', enabled:true },
+  { id:'startstar', name:'Étoile de départ', desc:'Tu commences le prochain niveau invincible.', price:40, type:'star', value:6, limit:0, color:'#ffe066', enabled:true },
+  { id:'startspeed', name:'Éclair de départ', desc:'Tu commences le prochain niveau très rapide.', price:30, type:'speed', value:6, limit:0, color:'#5ad1ff', enabled:true }
+];
+let shopItems = null, shopTouched = false, savedChars = [], shopTimer = 0;
+function shopRead(){
+  try { const j = JSON.parse(localStorage.getItem(SHOPK) || 'null'); if(j && Array.isArray(j.items)){ shopTouched = true; return j.items; } } catch(e){}
+  return SHOP_DEF.map(i => ({ ...i }));
+}
+function shopSetState(t){ $('shopState').textContent = t || ''; }
+function shopPersist(){
+  try { localStorage.setItem(SHOPK, JSON.stringify({ format:'zkrshop', v:1, items:shopItems })); shopTouched = true; notifyGame(); shopSetState('✔ Enregistré dans ce navigateur (' + new Date().toLocaleTimeString() + ')'); }
+  catch(e){ shopSetState('⚠ Enregistrement impossible : ' + (e && e.message || e)); }
+}
+function shopDirty(){ shopSetState('Modifications en cours…'); clearTimeout(shopTimer); shopTimer = setTimeout(shopPersist, 400); }
+function shopNewId(){ return 'i_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+function shopPublicData(){ return shopTouched ? { items:shopItems } : undefined; }   // sans modification, le jeu garde ses articles par défaut
+function renderShopAdmin(){
+  if(!shopItems) shopItems = shopRead();
+  const box = $('shopList'); box.textContent = '';
+  if(!shopItems.length){ box.innerHTML = '<div class="small">Aucun article : la boutique du jeu sera vide.</div>'; return; }
+  shopItems.forEach((it, i) => {
+    const d = document.createElement('div'); d.className = 'sitem' + (it.enabled === false ? ' off' : ''); d.style.borderLeftColor = it.color || '#ffd700';
+    const valueField = it.type === 'char'
+      ? `<label>Personnage débloqué</label><select data-f="value">${BUILTIN_CHARS.map(c => `<option value="${escapeHtml(c[0])}">${escapeHtml(c[1])} (jeu)</option>`).join('')}${savedChars.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name || 'PERSO')} (importé)</option>`).join('')}</select>`
+      : `<label>${it.type === 'life' ? 'Cœurs ajoutés (1 à 3)' : 'Durée au départ du niveau (secondes, 2 à 30)'}</label><input type="number" data-f="value" min="${it.type === 'life' ? 1 : 2}" max="${it.type === 'life' ? 3 : 30}">`;
+    d.innerHTML = `<div class="hd"><input type="checkbox" data-f="enabled" title="Visible dans la boutique"><input type="text" data-f="name" maxlength="30" placeholder="Nom de l'article"><input type="color" data-f="color" style="width:34px;height:28px;flex:none;padding:0" title="Couleur de la carte"><button data-a="up" title="Monter">▲</button><button data-a="down" title="Descendre">▼</button><button data-a="del" title="Supprimer">🗑</button></div>
+      <label>Description (affichée aux joueurs)</label><input type="text" data-f="desc" maxlength="90">
+      <div class="row"><div><label>Prix (pièces)</label><input type="number" data-f="price" min="0" max="99999"></div><div><label>Type</label><select data-f="type">${Object.keys(SHOP_TYPES).map(k => `<option value="${k}">${SHOP_TYPES[k]}</option>`).join('')}</select></div></div>
+      ${valueField}
+      ${it.type === 'char' ? '<div class="small">Un personnage ne s\'achète qu\'une fois.</div>' : '<label>Achats maximum par joueur (0 = illimité)</label><input type="number" data-f="limit" min="0" max="99">'}`;
+    const q = f => d.querySelector(`[data-f="${f}"]`);
+    q('enabled').checked = it.enabled !== false; q('name').value = it.name || ''; q('color').value = /^#[0-9a-f]{6}$/i.test(it.color) ? it.color : '#ffd700'; q('desc').value = it.desc || '';
+    q('price').value = it.price; q('type').value = it.type; q('value').value = it.value; if(q('limit')) q('limit').value = it.limit;
+    q('enabled').onchange = e => { it.enabled = e.target.checked; d.classList.toggle('off', !it.enabled); shopDirty(); };
+    q('name').oninput = e => { it.name = e.target.value; shopDirty(); };
+    q('color').oninput = e => { it.color = e.target.value; d.style.borderLeftColor = it.color; shopDirty(); };
+    q('desc').oninput = e => { it.desc = e.target.value; shopDirty(); };
+    q('price').oninput = e => { it.price = Math.max(0, Math.min(99999, parseInt(e.target.value) || 0)); shopDirty(); };
+    q('value').oninput = q('value').onchange = e => { if(it.type === 'char') it.value = e.target.value; else { const lo = it.type === 'life' ? 1 : 2, hi = it.type === 'life' ? 3 : 30; it.value = Math.max(lo, Math.min(hi, parseInt(e.target.value) || lo)); } shopDirty(); };
+    if(q('limit')) q('limit').oninput = e => { it.limit = Math.max(0, Math.min(99, parseInt(e.target.value) || 0)); shopDirty(); };
+    q('type').onchange = e => {
+      it.type = e.target.value;
+      if(it.type === 'char'){ it.value = (BUILTIN_CHARS[0] || [''])[0]; it.limit = 1; } else { it.value = it.type === 'life' ? 1 : 6; if(it.limit === 1 && it.type !== 'life') it.limit = 0; }
+      shopDirty(); renderShopAdmin();
+    };
+    d.querySelector('[data-a="up"]').onclick = () => { if(i > 0){ [shopItems[i - 1], shopItems[i]] = [shopItems[i], shopItems[i - 1]]; shopDirty(); renderShopAdmin(); } };
+    d.querySelector('[data-a="down"]').onclick = () => { if(i < shopItems.length - 1){ [shopItems[i + 1], shopItems[i]] = [shopItems[i], shopItems[i + 1]]; shopDirty(); renderShopAdmin(); } };
+    d.querySelector('[data-a="del"]').onclick = () => { if(confirm('Supprimer « ' + (it.name || 'cet article') + ' » de la boutique ?')){ shopItems.splice(i, 1); shopDirty(); renderShopAdmin(); } };
+    box.appendChild(d);
+  });
+}
+$('btnShopAdd').onclick = () => { if(!shopItems) shopItems = shopRead(); shopItems.push({ id:shopNewId(), name:'Nouvel article', desc:'', price:50, type:'star', value:6, limit:0, color:'#ffd700', enabled:true }); shopDirty(); renderShopAdmin(); };
+$('btnShopReset').onclick = () => { if(confirm('Remplacer tous les articles par ceux par défaut ?')){ shopItems = SHOP_DEF.map(i => ({ ...i })); shopDirty(); renderShopAdmin(); } };
+$('btnShopSave').onclick = async () => { clearTimeout(shopTimer); shopPersist(); const ok = await publishAll(true); if(ok) shopSetState('✔ Boutique enregistrée et publiée pour tous les joueurs.'); else if(!pubCfg().repo || !pubCfg().token) msg('Boutique enregistrée ici. Renseigne le dépôt et le token (section 7) pour la publier à tous les joueurs.', 7000); };
+addEventListener('storage', e => { if(e.key === SHOPK){ shopItems = shopRead(); renderShopAdmin(); } });
+
 refreshSaved();
+renderShopAdmin();
 </script>
 </body>
 </html>
